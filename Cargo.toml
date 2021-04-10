@@ -8,4 +8,9 @@ description = "Implicit Data Markup"
 categories = ["encoding"]
 
 [dependencies]
+paste = "1"
 serde = "1"
+serde_derive = "1"
+
+[dev-dependencies]
+pretty_assertions = "0.7"

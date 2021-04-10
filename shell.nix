@@ -5,7 +5,8 @@ let
 in
 pkgs.mkShell {
   buildInputs = with pkgs; [
-    rustc cargo rustfmt rust-analyzer cargo-outdated clippy
+    rustc cargo rustfmt rust-analyzer
+    cargo-outdated cargo-tarpaulin cargo-watch clippy
 
     just  # Utils
   ];
