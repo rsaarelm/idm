@@ -76,26 +76,26 @@ assert_eq!(
 ## Syntax
 
 Indentation uses physical tab characters only, one tab per indent level. There
-are three general shapes for a complex value, *line*:
+are three general shapes for a complex value, a *line*:
 
 ```
 a b c
 ```
 
-*block*:
+a *block* of multiple lines at the same indent depth:
 
 ```
-a
-b
+a b
 c
+d e f
 ```
 
-and outline *section* with a headline and a body:
+and a *section* with a headline and an indented block body:
 
 ```
-a
-	b
+a b
 	c
+	d e f
 ```
 
 Whitespace is the only separator, there is no string quoting or character
