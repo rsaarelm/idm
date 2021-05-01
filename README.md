@@ -17,45 +17,10 @@ embedded in a plaintext indented outline notes file. The entire file
 deserializes into the canonical IDM outline type, and parts of it can be
 deserialized into various structured data types.
 
-## Example
-
-Deserializing
-
-```
-title: A single string
-tags: one two three
-matrix:
-	1 2 3
-	4 5 6
-	7 8 9
-```
-
-into a value of type
-
-```rust
-struct Example {
-    title: String,
-    tags: Vec<String>,
-    matrix: Vec<Vec<i32>>,
-}
-```
-
-produces
-
-```rust
-Example {
-    title: "A single string",
-    tags: ["one", "two", "three"],
-    matrix: [
-        [1, 2, 3],
-        [4, 5, 6],
-        [7, 8, 9]],
-}
-```
-
 ## Type-driven serialization
 
-Parsing data depends on the type it is parsed into. Depending on the type,
+The same IDM data can be parsed in several ways depending on the type it's being parsed
+into. Depending on the type,
 
 ```
 1 2 3
@@ -65,6 +30,48 @@ Parsing data depends on the type it is parsed into. Depending on the type,
 
 might be a 3x3 matrix, a list of 3 strings, a single multi-line string or an
 indented outline document (that happens to not have any indented lines).
+
+## Usage
+
+IDM implements [Serde](https://serde.rs/) serialization.
+
+Use `idm::from_str` to deserialize Serde-deserializable data. Use
+`idm::to_string` to serialize Serde-serializable data.
+
+### Example
+
+```rust
+use serde_derive::{Deserialize, Serialize};
+
+// A data serializable data type used as the type schema.
+#[derive(PartialEq, Eq, Debug, Serialize, Deserialize)]
+struct Example {
+    description_line: String,
+    tags: Vec<String>,
+    matrix: Vec<Vec<i32>>,
+}
+
+// IDM data using this schema
+const IDM_DATA: &str = "\
+description-line: A single string
+tags: one two three
+matrix:
+	1 2 3
+	4 5 6
+	7 8 9";
+
+// Data deserializes into a Rust value.
+// Note how schema differences make 'description-line' and 'tags' get parsed differently.
+// Note how IDM 'description-line' becomes Rust 'description_line'.
+assert_eq!(
+    idm::from_str::<Example>(IDM_DATA).unwrap(),
+    Example {
+        description_line: "A single string".into(),
+        tags: vec!["one".into(), "two".into(), "three".into()],
+        matrix: vec![vec![1, 2, 3], vec![4, 5, 6], vec![7, 8, 9]],
+    }
+);
+```
 
 ## Syntax
 
