@@ -25,9 +25,9 @@ Deserializing
 title: A single string
 tags: one two three
 matrix:
-  1 2 3
-  4 5 6
-  7 8 9
+	1 2 3
+	4 5 6
+	7 8 9
 ```
 
 into a value of type
@@ -87,8 +87,8 @@ and outline *section* with a headline and a body:
 
 ```
 a
-  b
-  c
+	b
+	c
 ```
 
 Whitespace is the only separator, there is no string quoting or character
@@ -112,20 +112,20 @@ An IDM outline like
 
 ```
 Sol
-  age: 4.6e9
-  mass: 1.0
-  Earth
-    orbit: 1.0
-    mass: 1.0
-  Mars
-    orbit: 1.52
-    mass: 0.1
+	age: 4.6e9
+	mass: 1.0
+	Earth
+		orbit: 1.0
+		mass: 1.0
+	Mars
+		orbit: 1.52
+		mass: 0.1
 Alpha Centauri
-  age: 5.3e9
-  mass: 1.1
-  Chiron
-    orbit: 1.32
-    mass: 1.33
+	age: 5.3e9
+	mass: 1.1
+	Chiron
+		orbit: 1.32
+		mass: 1.33
 ```
 
 can be deserialized into a nested `Starmap` type:
@@ -170,11 +170,11 @@ missing, so it is represented as a line with a single comma (',').
 
 ```
 A
-    Child of first missing sub-headline
-    Indented two levels past 'A'
-  ,
-    Child of second missing sub-headline
-    Second missing headline must be marked with a ','
+		Child of first missing sub-headline
+		Indented two levels past 'A'
+	,
+		Child of second missing sub-headline
+		Second missing headline must be marked with a ','
 ```
 
 To have a literal single comma, write `,,`. And then `,,,` for a literal `,,`
