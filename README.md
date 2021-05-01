@@ -198,6 +198,18 @@ serialization work.
   Outline)`, which expands to a `Vec` type, show as the body of the serialized
   text outline without an extra level of indentation.
 
+## Parse matrix
+
+|                   | Inline item (word)     | Full line                      | Block                         | Section                                   |
+|-------------------|------------------------|--------------------------------|-------------------------------|-------------------------------------------|
+| primitive         | read as string, parse  | read as string, parse          | read as string, parse         | n/a                                       |
+| string            | read to whitespace/EOL | read to EOL                    | read to end of indented block | n/a                                       |
+| tuple             | n/a                    | words are items                | block sections are items      | headline is 1st item, body is rest        |
+| seq               | n/a                    | words are items                | block sections are items      | n/a                                       |
+| struct / map      | n/a                    | n/a                            | block sections are items      | n/a                                       |
+| struct / map item | n/a                    | key is 1st word, value is rest | n/a                           | headline is key, body is value            |
+| option            | n/a                    | n/a                            | n/a                           | missing headline is None, present is Some |
+
 ## License
 
 IDM is dual-licensed under Apache-2.0 and MIT.
