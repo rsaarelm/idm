@@ -205,17 +205,33 @@ serialization work.
   Outline)`, which expands to a `Vec` type, show as the body of the serialized
   text outline without an extra level of indentation.
 
+## Outline structure and value parsing
+
+The structure alternates between an outline that's a sequence of sections, and
+sections that are a headline and an outline body. The section is the structure
+that naturally corresponds to a single value.
+
+Given the option of having an empty headline, the three basic forms can all be
+interpreted as sections. A line is a section with an empty body and a block is
+the body of a section with a missing headline. Input files are a block-like
+outline, so the parser may do hacky things like declaring the whole thing to
+be a single section with a missing headline at line -1 and depth -1.
+
 ## Parse matrix
 
-|                   | Inline item (word)     | Full line                      | Block                         | Section                                   |
-|-------------------|------------------------|--------------------------------|-------------------------------|-------------------------------------------|
-| primitive         | read as string, parse  | read as string, parse          | read as string, parse         | n/a                                       |
-| string            | read to whitespace/EOL | read to EOL                    | read to end of indented block | n/a                                       |
-| tuple             | n/a                    | words are items                | block sections are items      | headline is 1st item, body is rest        |
-| seq               | n/a                    | words are items                | block sections are items      | n/a                                       |
-| struct / map      | n/a                    | n/a                            | block sections are items      | n/a                                       |
-| struct / map item | n/a                    | key is 1st word, value is rest | n/a                           | headline is key, body is value            |
-| option            | n/a                    | n/a                            | n/a                           | missing headline is None, present is Some |
+|                   | Inline item (word)     | Full line                      | Block                         | Section                                      |
+|-------------------|------------------------|--------------------------------|-------------------------------|----------------------------------------------|
+| primitive         | read as string, parse  | read as string, parse          | read as string, parse         | n/a                                          |
+| string            | read to whitespace/EOL | read to EOL                    | read to end of indented block | n/a                                          |
+| tuple             | n/a                    | words are items                | block sections are items      | headline is 1st item, body is rest           |
+| seq               | n/a                    | words are items                | block sections are items      | n/a                                          |
+| struct / map      | n/a                    | n/a                            | block sections are items      | n/a                                          |
+| struct / map item | n/a                    | key is 1st word, value is rest | n/a                           | headline is key, body is value               |
+| option            | n/a                    | n/a                            | n/a                           | missing headline is None, present is Some \* |
+
+\*: `None` option values are only expected to show up in the first position
+of a tuple for the canonical outline type, not standalone. Most of IDM doesn't
+have good facilities for expressing empty values.
 
 ## License
 
