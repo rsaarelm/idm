@@ -1,77 +1,27 @@
 # Implicit Data Markup
 
-IDM is a non-self-describing, indentation based data serialization format that
-is intended to be succinct and comfortable for editing by hand. The parser
-expects to know the structure of the type it is deserializing into and may
-parse the same input differently based on it. By not having the format be
-self-describing, the syntax can be very lightweight.
+IDM is a non-self-describing data serialization format intended to be both
+written and read by humans.
 
-IDM is somewhat fragile and experimental. The purpose is to provide a very
-concise and minimalist syntax for typing structured data by hand. You are
-expected to have control of both the data and the datatypes it serializes into
-to prevent corner cases that cannot be handled. If you need a more verbose and
-robust data language, use JSON, YAML or [RON](https://github.com/ron-rs/ron).
+It uses an indentation-based outline syntax with semantically significant
+physical tab indents. (Yes, they must be physical tabs. No, this can't change
+without altering the format.) It requires an external type schema to direct
+parsing the input, the same input can be parsed in different ways if a
+different type is expected. In the Rust version, the type schema is provided
+by the [Serde data model](https://serde.rs/data-model.html).
 
-The use case for IDM is a sort of freeform handwritten personal database
-embedded in a plaintext indented outline notes file. The entire file
-deserializes into the canonical IDM outline type, and parts of it can be
-deserialized into various structured data types.
+The motivation is to provide a notation that is close to freeform handwritten
+plaintext notes. Because the format is not self-describing, the syntax can be
+very lightweight.
 
-## Type-driven serialization
+It's basically a fixie bike serialization format. Simple, arguably fun and
+having it as your daily driver might cause a horrific crash sooner or later.
+It is excepted that the user controls both the data and the types when using
+it, and can work around corner cases which it can't handle.
 
-The same IDM data can be parsed in several ways depending on the type it's being parsed
-into. Depending on the type,
-
-```
-1 2 3
-4 5 6
-7 8 9
-```
-
-might be a 3x3 matrix, a list of 3 strings, a single multi-line string or an
-indented outline document (that happens to not have any indented lines).
-
-## Usage
-
-IDM implements [Serde](https://serde.rs/) serialization.
-
-Use `idm::from_str` to deserialize Serde-deserializable data. Use
-`idm::to_string` to serialize Serde-serializable data.
-
-### Example
-
-```rust
-use serde_derive::{Deserialize, Serialize};
-
-// A data serializable data type used as the type schema.
-#[derive(PartialEq, Eq, Debug, Serialize, Deserialize)]
-struct Example {
-    description_line: String,
-    tags: Vec<String>,
-    matrix: Vec<Vec<i32>>,
-}
-
-// IDM data using this schema
-const IDM_DATA: &str = "\
-description-line: A single string
-tags: one two three
-matrix:
-	1 2 3
-	4 5 6
-	7 8 9";
-
-// Data deserializes into a Rust value.
-// Note how schema differences make 'description-line' and 'tags' get parsed differently.
-// Note how IDM 'description-line' becomes Rust 'description_line'.
-assert_eq!(
-    idm::from_str::<Example>(IDM_DATA).unwrap(),
-    Example {
-        description_line: "A single string".into(),
-        tags: vec!["one".into(), "two".into(), "three".into()],
-        matrix: vec![vec![1, 2, 3], vec![4, 5, 6], vec![7, 8, 9]],
-    }
-);
-```
+If you need robust serialization of any Rust data structure or just general
+high reliability, you probably want a more verbose serialization language like
+JSON, YAML or [RON](https://github.com/ron-rs/ron).
 
 ## Syntax
 
@@ -159,6 +109,48 @@ This will produce a nesting of named maps and data.
 Note the design pattern where the names of the elements are pushed out of the
 value struct and into map keys. This will probably be a recurring feature in
 datatypes optimized for IDM.
+
+## Usage
+
+IDM implements [Serde](https://serde.rs/) serialization.
+
+Use `idm::from_str` to deserialize Serde-deserializable data. Use
+`idm::to_string` to serialize Serde-serializable data.
+
+### Example
+
+```rust
+use serde_derive::{Deserialize, Serialize};
+
+// A data serializable data type used as the type schema.
+#[derive(PartialEq, Eq, Debug, Serialize, Deserialize)]
+struct Example {
+    description_line: String,
+    tags: Vec<String>,
+    matrix: Vec<Vec<i32>>,
+}
+
+// IDM data using this schema
+const IDM_DATA: &str = "\
+description-line: A single string
+tags: one two three
+matrix:
+	1 2 3
+	4 5 6
+	7 8 9";
+
+// Data deserializes into a Rust value.
+// Note how schema differences make 'description-line' and 'tags' get parsed differently.
+// Note how IDM 'description-line' becomes Rust 'description_line'.
+assert_eq!(
+    idm::from_str::<Example>(IDM_DATA).unwrap(),
+    Example {
+        description_line: "A single string".into(),
+        tags: vec!["one".into(), "two".into(), "three".into()],
+        matrix: vec![vec![1, 2, 3], vec![4, 5, 6], vec![7, 8, 9]],
+    }
+);
+```
 
 ## The canonical outline type
 
