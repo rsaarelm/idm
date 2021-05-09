@@ -16,7 +16,7 @@ very lightweight.
 
 It's basically a fixie bike serialization format. Simple, arguably fun and
 having it as your daily driver might cause a horrific crash sooner or later.
-It is excepted that the user controls both the data and the types when using
+It is expected that the user controls both the data and the types when using
 it, and can work around corner cases which it can't handle.
 
 If you need robust serialization of any Rust data structure or just general
@@ -54,7 +54,7 @@ whitespace-less tokens. For values that require whitespace, indentation works
 as a general-purpose escape mechanism. The value ends at the line that is
 indented less than the one at the start of the value.
 
-Struct fields are in kebab-case (the serde IDM implementation automatically
+Struct fields are in kebab-case (the Serde IDM implementation automatically
 converts between Rust's default camel\_case and kebab-case) and followed by a
 colon. The valid fields of a struct block must be in the initial lines, lines
 from the first field that can't be parsed as a struct field onwards are
@@ -157,7 +157,7 @@ assert_eq!(
 Any IDM file can be described by the general outline type, `struct
 Outline(Vec<(Option<String>, Outline)>)`. This denotes a block of sections,
 where the headlines may be missing. Values of this type will serialize into
-the corresponding IDM documents with the default serde derivation.
+the corresponding IDM documents with the default Serde derivation.
 
 Missing headlines are different from headlines containing an empty string. They
 can be entirely absent from the document, while empty strings must be present
