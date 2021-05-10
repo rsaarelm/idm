@@ -1,309 +1,350 @@
 use crate::{from_str, outline, to_string};
 use pretty_assertions::assert_eq;
 use serde_derive::{Deserialize, Serialize};
+use std::fmt;
 
 type Outline = outline::Outline<Option<String>>;
 
+#[derive(Copy, Clone, Default, Debug)]
+struct TestCase {
+    allow_inexact_reserialization: bool,
+}
+
+impl TestCase {
+    fn inexact() -> TestCase {
+        TestCase {
+            allow_inexact_reserialization: true,
+        }
+    }
+
+    fn test<T>(self, idm: &str, val: &T)
+    where
+        T: PartialEq
+            + fmt::Debug
+            + serde::Serialize
+            + serde::de::DeserializeOwned,
+    {
+        let deser =
+            from_str::<T>(idm).expect("IDM did not deserialize to type");
+        assert_eq!(&deser, val);
+
+        let reser = to_string(val).expect("Value did not serialize to IDM");
+
+        if self.allow_inexact_reserialization {
+            // Reserialization may differ from original IDM (different order
+            // of fields, removed comments etc).
+            let new_deser = from_str::<T>(&reser)
+                .expect("Serialized IDM did not deserialize to type");
+            // It must still deserialize to same value.
+            assert_eq!(&new_deser, val);
+        } else {
+            // Reserialization must be the same as the original IDM.
+            // In this case it should be safe to assume reserialization also
+            // deserializes the same way.
+            assert_eq!(idm, reser.trim_end());
+        }
+    }
+}
+
+// Convenience wrapper for fluent test.
+fn test<T>(idm: &str, val: &T)
+where
+    T: PartialEq + fmt::Debug + serde::Serialize + serde::de::DeserializeOwned,
+{
+    TestCase::default().test(idm, val);
+}
+
+fn test_inexact<T>(idm: &str, val: &T)
+where
+    T: PartialEq + fmt::Debug + serde::Serialize + serde::de::DeserializeOwned,
+{
+    TestCase::inexact().test(idm, val);
+}
+
+// Conveninence constructor for String literals.
+fn s(s: &str) -> String {
+    s.to_string()
+}
+
 #[test]
 fn test_atom() {
-    assert_eq!(from_str::<u32>("123").unwrap(), 123);
-    assert_eq!(from_str::<f32>("2.718").unwrap(), 2.718);
-    assert_eq!(from_str::<String>("xyzzy").unwrap(), "xyzzy");
-    assert_eq!(from_str::<String>("one\ntwo").unwrap(), "one\ntwo");
+    test("123", &123u32);
+    test("2.718", &2.718f32);
+    test("xyzzy", &s("xyzzy"));
+    test("one two", &s("one two"));
+    test("one\ntwo", &s("one\ntwo"));
+    test("one two\nthree", &s("one two\nthree"));
 }
 
 #[test]
 fn test_simple_sequence() {
-    assert_eq!(from_str::<Vec<i32>>("").unwrap(), vec![]);
+    test::<Vec<i32>>("", &vec![]);
 
-    assert_eq!(
-        from_str::<Vec<String>>("foo\nbar\nbaz").unwrap(),
-        vec!["foo".to_string(), "bar".to_string(), "baz".to_string()]
-    );
-
-    assert_eq!(from_str::<Vec<i32>>("1\n2\n3").unwrap(), vec![1, 2, 3]);
+    test("foo\nbar\nbaz", &vec![s("foo"), s("bar"), s("baz")]);
+    test("1\n2\n3", &vec![1, 2, 3]);
+    test("1\n2\n3", &(1, 2, 3));
 }
 
 #[test]
 fn test_nested_sequence() {
+    // All tests are repeated for seq-like Vec types and tuple-like array
+    // types because those types have different code paths in the serializer.
+
     // Inline inner form matrix
-    assert_eq!(
-        from_str::<Vec<Vec<i32>>>(
-            "\
+
+    // Vec case (seq)
+    test(
+        "\
 1 2
-3 4"
-        )
-        .unwrap(),
-        vec![vec![1, 2], vec![3, 4]]
+3 4",
+        &vec![vec![1, 2], vec![3, 4]],
     );
 
-    assert_eq!(
-        from_str::<[[i32; 2]; 2]>(
-            "\
+    // Array case (tuple)
+    test(
+        "\
 1 2
-3 4"
-        )
-        .unwrap(),
-        [[1, 2], [3, 4]]
+3 4",
+        &[[1, 2], [3, 4]],
     );
 
     // Outline inner form
-    assert_eq!(
-        from_str::<Vec<Vec<i32>>>(
-            "\
-,
+    // Not the default serialization form, so we specify an inexact test.
+
+    test_inexact(
+        "\
 \t1
 \t2
 ,
 \t3
-\t4"
-        )
-        .unwrap(),
-        vec![vec![1, 2], vec![3, 4]]
+\t4",
+        &vec![vec![1, 2], vec![3, 4]],
+    );
+
+    test_inexact(
+        "\
+\t1
+\t2
+,
+\t3
+\t4",
+        &[[1, 2], [3, 4]],
     );
 
     // Outline list of matrices.
-    assert_eq!(
-        from_str::<Vec<Vec<Vec<i32>>>>(
-            "\
-,
+    test(
+        "\
 \t1 2
 \t3 4
 ,
 \t5 6
-\t7 8"
-        )
-        .unwrap(),
-        vec![vec![vec![1, 2], vec![3, 4]], vec![vec![5, 6], vec![7, 8]]]
+\t7 8",
+        &vec![vec![vec![1, 2], vec![3, 4]], vec![vec![5, 6], vec![7, 8]]],
     );
-}
 
-#[test]
-fn test_simple_tuple() {
-    assert_eq!(from_str::<(i32, i32)>("1\n2").unwrap(), (1, 2));
-    assert_eq!(
-        from_str::<Vec<(i32, i32)>>("1 2\n3 4").unwrap(),
-        vec![(1, 2), (3, 4)]
+    test(
+        "\
+\t1 2
+\t3 4
+,
+\t5 6
+\t7 8",
+        &[[[1, 2], [3, 4]], [[5, 6], [7, 8]]],
     );
 }
 
 #[test]
 fn test_section_tuple() {
-    assert_eq!(from_str::<Vec<(i32, i32)>>("1\n\t2").unwrap(), vec![(1, 2)]);
-    assert_eq!(
-        from_str::<Vec<(i32, i32, i32)>>("1\n\t2\n\t3").unwrap(),
-        vec![(1, 2, 3)]
+    test_inexact(
+        "\
+1
+\t2",
+        &vec![(1, 2)],
     );
-    assert_eq!(
-        from_str::<Vec<(i32, i32)>>("1\n\t2\n3\n\t4").unwrap(),
-        vec![(1, 2), (3, 4)]
+
+    test_inexact(
+        "\
+1
+\t2
+\t3",
+        &vec![(1, 2, 3)],
+    );
+
+    test_inexact(
+        "\
+1
+\t2
+3
+\t4",
+        &vec![(1, 2), (3, 4)],
     );
 }
 
 #[test]
 fn test_tuple_tail_sequence_continuation() {
-    assert_eq!(
-        from_str::<(i32, i32, Vec<i32>)>("1\n2\n3\n4").unwrap(),
-        (1, 2, vec![3, 4])
+    test::<(i32, i32, Vec<i32>)>(
+        "\
+1
+2
+3
+4",
+        &(1, 2, vec![3, 4]),
     );
 }
 
 #[test]
 fn test_option_tuple() {
-    assert_eq!(
-        from_str::<Vec<(Option<i32>, i32)>>("1\n\t2").unwrap(),
-        vec![(Some(1), 2)]
+    test::<Vec<(Option<i32>, i32)>>(
+        "\
+1
+\t2",
+        &vec![(Some(1), 2)],
     );
-    assert_eq!(
-        from_str::<Vec<(Option<i32>, i32)>>(",\n\t2").unwrap(),
-        vec![(None, 2)]
+
+    test_inexact::<Vec<(Option<i32>, i32)>>(
+        "\
+,
+\t2",
+        &vec![(None, 2)],
     );
-    assert_eq!(
-        from_str::<Vec<(Option<i32>, i32)>>("\t2").unwrap(),
-        vec![(None, 2)]
+
+    test::<Vec<(Option<i32>, i32)>>(
+        "\
+
+\t2",
+        &vec![(None, 2)],
     );
 }
 
 #[test]
 fn test_canonical_outline() {
-    assert_eq!(from_str::<Outline>("").unwrap(), Outline::default());
+    test("", &Outline::default());
 
-    assert_eq!(from_str::<Outline>("Xyzzy").unwrap(), outline!["Xyzzy"]);
+    test("Xyzzy", &outline!["Xyzzy"]);
 
-    assert_eq!(
-        from_str::<Outline>(
-            "\
+    test("A\n\nB", &outline![["A", ""], "B"]);
+
+    test("A\n\tB\n\n\tC", &outline![["A", ["B", ""], "C"]]);
+
+    test("A\n  B", &outline!["A", "  B"]);
+
+    test(
+        "\
 Xyzzy
-\tPlugh"
-        )
-        .unwrap(),
-        outline![["Xyzzy", "Plugh"]]
+\tPlugh",
+        &outline![["Xyzzy", "Plugh"]],
     );
 
-    assert_eq!(
-        from_str::<Outline>(
-            "\
+    test(
+        "\
 Xyzzy
-Plugh"
-        )
-        .unwrap(),
-        outline!["Xyzzy", "Plugh"]
+Plugh",
+        &outline!["Xyzzy", "Plugh"],
     );
 
-    assert_eq!(
-        from_str::<Outline>(
-            "\
-\tPlugh"
-        )
-        .unwrap(),
-        outline![[, "Plugh"]]
+    test(
+        "\
+\tPlugh",
+        &outline![[, "Plugh"]],
     );
 
-    assert_eq!(
-        from_str::<Outline>(
-            "\
+    test_inexact(
+        "\
 ,
-\tPlugh"
-        )
-        .unwrap(),
-        outline![[, "Plugh"]]
+\tPlugh",
+        &outline![[, "Plugh"]],
     );
 
-    assert_eq!(
-        from_str::<Outline>(
-            "\
+    test(
+        "\
 Xyzzy
 \tPlugh
 Qux
-\tQuux"
-        )
-        .unwrap(),
-        outline![["Xyzzy", "Plugh"], ["Qux", "Quux"]]
+\tQuux",
+        &outline![["Xyzzy", "Plugh"], ["Qux", "Quux"]],
     );
 
-    assert_eq!(
-        from_str::<Outline>(
-            "\
+    test(
+        "\
 Xyzzy
 \tPlugh
 \tBlorb
 Qux
-\tQuux"
-        )
-        .unwrap(),
-        outline![["Xyzzy", "Plugh", "Blorb"], ["Qux", "Quux"]]
+\tQuux",
+        &outline![["Xyzzy", "Plugh", "Blorb"], ["Qux", "Quux"]],
     );
 
-    assert_eq!(
-        from_str::<Outline>(
-            "\
+    test(
+        "\
 Xyzzy
 \tPlugh
 ,
-\tQuux"
-        )
-        .unwrap(),
-        outline![["Xyzzy", "Plugh"], [, "Quux"]]
+\tQuux",
+        &outline![["Xyzzy", "Plugh"], [, "Quux"]],
     );
 
-    assert_eq!(
-        from_str::<Outline>(
-            "\
+    test(
+        "\
 A
 ,
 \tC",
-        )
-        .unwrap(),
-        outline!["A", [, "C"]]
-    );
-}
-
-#[test]
-fn test_blank_line() {
-    assert_eq!(
-        from_str::<Outline>("a\n\tb\n\n\tc").unwrap(),
-        outline![["a", ["b", ""], "c"]]
+        &outline!["A", [, "C"]],
     );
 }
 
 #[test]
 fn test_comma_escape() {
-    assert_eq!(
-        from_str::<Vec<String>>(",,\n,\n\tfoo").unwrap(),
-        vec![",", "foo"]
+    test_inexact::<Vec<String>>("\t,,\n,\n\tfoo", &vec![s(","), s("foo")]);
+
+    test(
+        "\
+A
+,,
+B",
+        &outline!["A", ",", "B"],
     );
-}
-
-#[derive(Clone, Eq, PartialEq, Default, Debug, Serialize, Deserialize)]
-struct Simple {
-    name_text: String,
-    x: i32,
-    y: i32,
-}
-
-#[derive(Clone, Eq, PartialEq, Default, Debug, Serialize, Deserialize)]
-struct Vectored {
-    v: Vec<i32>,
 }
 
 #[test]
 fn test_struct() {
-    assert_eq!(
-        from_str::<Simple>(
-            "\
+    #[derive(Clone, Eq, PartialEq, Default, Debug, Serialize, Deserialize)]
+    struct Simple {
+        name_text: String,
+        x: i32,
+        y: i32,
+    }
+
+    #[derive(Clone, Eq, PartialEq, Default, Debug, Serialize, Deserialize)]
+    struct Vectored {
+        v: Vec<i32>,
+    }
+
+    test(
+        "\
 name-text: Foo bar
 x: 1
-y: 2"
-        )
-        .unwrap(),
-        Simple {
-            name_text: "Foo bar".into(),
+y: 2",
+        &Simple {
+            name_text: s("Foo bar"),
             x: 1,
-            y: 2
-        }
+            y: 2,
+        },
     );
 
-    assert_eq!(
-        from_str::<Vectored>(
-            "\
-v: 1 2 3"
-        )
-        .unwrap(),
-        Vectored { v: vec![1, 2, 3] }
+    test(
+        "\
+v: 1 2 3",
+        &Vectored { v: vec![1, 2, 3] },
     );
 
-    assert_eq!(
-        from_str::<Vectored>(
-            "\
+    test_inexact(
+        "\
 v:
 \t1
 \t2
 \t3
-blarp"
-        )
-        .unwrap(),
-        Vectored { v: vec![1, 2, 3] }
-    );
-
-    assert_eq!(
-        to_string(&Simple {
-            name_text: "Foo bar".into(),
-            x: 1,
-            y: 2
-        })
-        .unwrap()
-        .trim_end(),
-        "\
-name-text: Foo bar
-x: 1
-y: 2"
-    );
-
-    assert_eq!(
-        to_string(&Vectored { v: vec![1, 2, 3] })
-            .unwrap()
-            .trim_end(),
-        "v: 1 2 3"
+chaff",
+        &Vectored { v: vec![1, 2, 3] },
     );
 }
 
@@ -313,23 +354,39 @@ fn test_struct_contents() {
     struct Contentful {
         x: i32,
         y: i32,
-        _contents: String,
+        _contents: Outline,
     }
 
-    assert_eq!(
-        from_str::<Contentful>(
-            "\
+    test(
+        "\
 x: 1
 y: 2
-Hello, world!
-xyzzy"
-        )
-        .unwrap(),
-        Contentful {
+A
+\tB",
+        &Contentful {
             x: 1,
             y: 2,
-            _contents: "Hello, world!\nxyzzy".into()
-        }
+            _contents: outline![["A", "B"]],
+        },
+    );
+
+    #[derive(Clone, Eq, PartialEq, Default, Debug, Serialize, Deserialize)]
+    struct Contentful2 {
+        x: i32,
+        y: i32,
+        _contents: Vec<String>,
+    }
+    test(
+        "\
+x: 1
+y: 2
+A
+B",
+        &Contentful2 {
+            x: 1,
+            y: 2,
+            _contents: vec![s("A"), s("B")],
+        },
     );
 }
 
@@ -377,8 +434,6 @@ Alpha Centauri
         mass: f32,
     }
 
-    let parsed_starmap = from_str::<BTreeMap<String, Star>>(STARMAP).unwrap();
-
     #[rustfmt::skip]
     let starmap = BTreeMap::from_iter(
         vec![
@@ -413,124 +468,66 @@ Alpha Centauri
         ].into_iter(),
     );
 
-    assert_eq!(parsed_starmap, starmap);
+    test_inexact(STARMAP, &starmap);
+}
 
-    // Roundtrip doesn't keep the formatting quite intact...
-    assert_eq!(
-        to_string(&starmap).unwrap().trim(),
+#[test]
+fn test_value_length() {
+    #[derive(PartialEq, Default, Debug, Serialize, Deserialize)]
+    struct Entry {
+        x: String,
+        y: String,
+    }
+    test("\
+x: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+y: b",
+    &Entry {
+x: s("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+y: s("b")
+    });
+
+    #[derive(PartialEq, Default, Debug, Serialize, Deserialize)]
+    struct List {
+        x: Vec<String>,
+        y: String,
+    }
+
+    test(
         "\
-Alpha Centauri
-	age: 5300000000
-	mass: 1.1
-	Chiron
-		orbit: 1.32
-		mass: 1.33
-	Eurytion
-		orbit: 0.47
-		mass: 0.08
-Sol
-	age: 4600000000
-	mass: 1
-	Earth
-		orbit: 1
-		mass: 1
-	Mars
-		orbit: 1.52
-		mass: 0.1
-	Mercury
-		orbit: 0.39
-		mass: 0.055
-	Venus
-		orbit: 0.72
-		mass: 0.815"
-    );
-}
-
-#[test]
-fn test_serialize_atom() {
-    assert_eq!(to_string(&1u32).unwrap().trim(), "1");
-    assert_eq!(to_string(&"foo").unwrap().trim(), "foo");
-    assert_eq!(to_string(&"foo bar").unwrap().trim(), "foo bar");
-    assert_eq!(to_string(&"foo bar\nbaz").unwrap().trim(), "foo bar\nbaz");
-}
-
-#[test]
-fn test_serialize_seq() {
-    // Toplevel seq can't be inlined because it always has a missing dummy
-    // headline at depth -1 that forces the rest into outline mode.
-
-    // Tuple and seq serializers are different. Test this with both arrays
-    // (treated as tuples) and vecs (treated as seqs).
-    assert_eq!(
-        to_string(&["foo", "bar", "baz"]).unwrap().trim_end(),
-        "foo\nbar\nbaz"
+x: a b c
+y: a",
+        &List {
+            x: vec![s("a"), s("b"), s("c")],
+            y: s("a"),
+        },
     );
 
-    assert_eq!(
-        to_string(&vec!["foo", "bar", "baz"]).unwrap().trim_end(),
-        "foo\nbar\nbaz"
+    test(
+        "\
+x:
+	rindfleischetikettierungsüberwachungsaufgabenübertragungsgesetz
+	betäubungsmittelverschreibungsverordnung
+	rechtsschutzversicherungsgesellschaften
+y: a",
+        &List {
+            x: vec![
+s("rindfleischetikettierungsüberwachungsaufgabenübertragungsgesetz"),
+s("betäubungsmittelverschreibungsverordnung"),
+s("rechtsschutzversicherungsgesellschaften")],
+            y: s("a"),
+        },
     );
 
-    assert_eq!(
-        to_string(&[&[1u32, 2], &[3, 4]]).unwrap().trim_end(),
-        "1 2\n3 4"
-    );
-
-    assert_eq!(
-        to_string(&vec![&vec![1u32, 2], &vec![3, 4]])
-            .unwrap()
-            .trim_end(),
-        "1 2\n3 4"
-    );
-
-    assert_eq!(
-        to_string(&[&[&[1u32, 2], &[3, 4]], &[&[5, 6], &[7, 8]]])
-            .unwrap()
-            .trim_end(),
-        "\t1 2\n\t3 4\n,\n\t5 6\n\t7 8"
-    );
-}
-
-#[test]
-fn test_serialize_outline() {
-    assert_eq!(to_string(&outline![]).unwrap().trim_end(), "");
-
-    assert_eq!(to_string(&outline!["A"]).unwrap().trim_end(), "A");
-
-    assert_eq!(to_string(&outline!["A", "B"]).unwrap().trim_end(), "A\nB");
-
-    assert_eq!(
-        to_string(&outline![["A", "B"]]).unwrap().trim_end(),
-        "A\n\tB"
-    );
-
-    assert_eq!(to_string(&outline![[, "B"]]).unwrap().trim_end(), "\tB");
-
-    assert_eq!(
-        to_string(&outline!["A", "", "B"]).unwrap().trim_end(),
-        "A\n\nB"
-    );
-
-    assert_eq!(
-        to_string(&outline!["A", "  B"]).unwrap().trim_end(),
-        "A\n  B"
-    );
-
-    assert_eq!(
-        to_string(&outline!["A", [, "B"]]).unwrap().trim_end(),
-        "A\n,\n\tB"
-    );
-
-    // Escaping literal comma.
-    assert_eq!(
-        to_string(&outline!["A", ",", "B"]).unwrap().trim_end(),
-        "A\n,,\nB"
-    );
-
-    assert_eq!(
-        to_string(&outline![["A", "B", [, "D"]]])
-            .unwrap()
-            .trim_end(),
-        "A\n\tB\n\t,\n\t\tD"
+    test_inexact(
+        "\
+x: rindfleischetikettierungsüberwachungsaufgabenübertragungsgesetz betäubungsmittelverschreibungsverordnung rechtsschutzversicherungsgesellschaften
+y: a",
+        &List {
+            x: vec![
+s("rindfleischetikettierungsüberwachungsaufgabenübertragungsgesetz"),
+s("betäubungsmittelverschreibungsverordnung"),
+s("rechtsschutzversicherungsgesellschaften")],
+y: s("a"),
+        },
     );
 }
