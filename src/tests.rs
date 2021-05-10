@@ -342,10 +342,29 @@ v: 1 2 3",
 v:
 \t1
 \t2
-\t3
-chaff",
+\t3",
         &Vectored { v: vec![1, 2, 3] },
     );
+
+    // Must fail if there's no _contents field to grab contents
+    assert!(from_str::<Simple>(
+        "\
+name-text: Foo bar
+x: 1
+y: 2
+chaff"
+    )
+    .is_err());
+
+    // Must fail if a field can't be handled.
+    assert!(from_str::<Simple>(
+        "\
+name_text: a
+x: 1
+y: 2
+unexpected: stuff"
+    )
+    .is_err());
 }
 
 #[test]

@@ -3,6 +3,7 @@ use crate::{err, Error, Result};
 use paste::paste;
 use serde::de;
 use std::borrow::Cow;
+use std::collections::HashSet;
 use std::str::FromStr;
 
 pub fn from_str<'a, T>(input: &'a str) -> Result<T>
@@ -447,7 +448,7 @@ impl<'a, 'de> de::Deserializer<'de> for &'a mut Deserializer<'de> {
     fn deserialize_struct<V>(
         self,
         _name: &'static str,
-        _fields: &'static [&'static str],
+        fields: &'static [&'static str],
         visitor: V,
     ) -> Result<V::Value>
     where
@@ -461,7 +462,7 @@ impl<'a, 'de> de::Deserializer<'de> for &'a mut Deserializer<'de> {
         }
 
         self.enter_body()?;
-        visitor.visit_map(Sequence::new(self).struct_())
+        visitor.visit_map(Sequence::new(self).as_struct(fields))
     }
 
     fn deserialize_enum<V>(
@@ -502,6 +503,7 @@ struct Sequence<'a, 'de: 'a> {
     is_merged: bool,
     // True if deserializing a struct. Struct keys are read using read_key.
     is_struct: bool,
+    struct_fields: HashSet<&'static str>,
     // True if deserializing value into _contents dummy field
     contents_mode: bool,
 }
@@ -514,6 +516,7 @@ impl<'a, 'de> Sequence<'a, 'de> {
             idx: 0,
             is_merged: false,
             is_struct: false,
+            struct_fields: Default::default(),
             contents_mode: false,
         }
     }
@@ -528,8 +531,12 @@ impl<'a, 'de> Sequence<'a, 'de> {
         self
     }
 
-    fn struct_(mut self) -> Sequence<'a, 'de> {
+    fn as_struct(
+        mut self,
+        fields: &'static [&'static str],
+    ) -> Sequence<'a, 'de> {
         self.is_struct = true;
+        self.struct_fields = fields.into_iter().map(|&x| x).collect();
         self
     }
 }
@@ -659,6 +666,16 @@ impl<'a, 'de> de::MapAccess<'de> for Sequence<'a, 'de> {
         if self.is_struct {
             self.de.mode = ParsingMode::Key(false);
             if self.de.cursor.clone().key().is_err() {
+                // Must have _contents field present for the next bit to work.
+                //
+                // (Or have an empty fields list, in case we assume anything
+                // goes.)
+                if !self.struct_fields.is_empty()
+                    && !self.struct_fields.contains("_contents")
+                {
+                    return err!("next_key_seed: No _contents field to catch additional contents");
+                }
+
                 // There's still content, but no valid key. Do the magic bit
                 // and conjure up a '_contents' key for the remaining content.
                 self.de.mode = ParsingMode::Key(true);
@@ -667,6 +684,20 @@ impl<'a, 'de> de::MapAccess<'de> for Sequence<'a, 'de> {
                 // needs to end up in the _contents part.
                 self.de.current_depth -= 1;
                 self.contents_mode = true;
+            }
+
+            // Make sure we're only seeing struct keys we actually expect to
+            // see.
+            //
+            // Special case, if the expected list is empty, assume we're doing
+            // some special deserialization that takes freeform keys and just
+            // process everything.
+            if let Ok(key) = self.de.cursor.clone().key() {
+                if !self.struct_fields.is_empty()
+                    && !self.struct_fields.contains(key.as_str())
+                {
+                    return err!("next_key_seed: Unmatched struct key {}", key);
+                }
             }
         } else {
             if self.de.cursor.is_section(self.de.current_depth) {
