@@ -7,7 +7,6 @@ mod error;
 pub use error::{Error, Result};
 
 mod outline;
-pub use outline::Outline;
 
 mod ser;
 pub use ser::to_string;

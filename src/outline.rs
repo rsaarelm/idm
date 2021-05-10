@@ -56,7 +56,7 @@ macro_rules! outline_elt {
         (None, outline![$($child),+])
     };
     ($arg:expr) => {
-        (Some($arg.into()), $crate::Outline::default())
+        (Some($arg.into()), $crate::outline::Outline::default())
     };
 }
 
@@ -66,8 +66,8 @@ macro_rules! outline {
     [$($arg:tt),*] => {
         {
             use std::iter::FromIterator;
-            let ret: $crate::Outline<Option<String>> =
-                $crate::Outline::from_iter(vec![
+            let ret: $crate::outline::Outline<Option<String>> =
+                $crate::outline::Outline::from_iter(vec![
                     $($crate::outline_elt!($arg)),*
                 ].into_iter());
             ret

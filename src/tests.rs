@@ -2,7 +2,7 @@ use crate::{from_str, outline, to_string};
 use pretty_assertions::assert_eq;
 use serde_derive::{Deserialize, Serialize};
 
-type Outline = crate::Outline<Option<String>>;
+type Outline = outline::Outline<Option<String>>;
 
 #[test]
 fn test_atom() {
@@ -220,8 +220,6 @@ A
 
 #[test]
 fn test_blank_line() {
-    type Outline = crate::Outline<Option<String>>;
-
     assert_eq!(
         from_str::<Outline>("a\n\tb\n\n\tc").unwrap(),
         outline![["a", ["b", ""], "c"]]
