@@ -258,6 +258,13 @@ impl Expr {
         }
     }
 
+    fn is_matrix(&self) -> bool {
+        match self {
+            Seq(es) => es.iter().any(|e| e.is_seq()),
+            _ => false
+        }
+    }
+
     fn is_empty(&self) -> bool {
         match self {
             Atom(x) if x.len() == 0 => true,
@@ -624,7 +631,7 @@ impl SeqSerializer {
         // to the current tuple instead of adding it as its own object.
         //
         // (Don't do this for tuples that are seq-like rather than sections)
-        if self.idx > 1 && self.idx == self.len && !self.acc.is_seq() {
+        if self.idx > 1 && self.idx == self.len && !self.acc.is_matrix() {
             match elt {
                 Seq(es) => {
                     for e in es {
