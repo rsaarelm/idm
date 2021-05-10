@@ -245,7 +245,7 @@ impl Expr {
         match self {
             Section { .. } => true,
             Entry { value, .. } => {
-                !value.is_line() || self.len() > MAX_INLINE_SEQ_LENGTH
+                !value.is_line()
             }
             _ => false,
         }
