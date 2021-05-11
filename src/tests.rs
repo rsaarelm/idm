@@ -5,67 +5,6 @@ use std::fmt;
 
 type Outline = outline::Outline<Option<String>>;
 
-#[derive(Copy, Clone, Default, Debug)]
-struct TestCase {
-    allow_inexact_reserialization: bool,
-}
-
-impl TestCase {
-    fn inexact() -> TestCase {
-        TestCase {
-            allow_inexact_reserialization: true,
-        }
-    }
-
-    fn test<T>(self, idm: &str, val: &T)
-    where
-        T: PartialEq
-            + fmt::Debug
-            + serde::Serialize
-            + serde::de::DeserializeOwned,
-    {
-        let deser =
-            from_str::<T>(idm).expect("IDM did not deserialize to type");
-        assert_eq!(&deser, val);
-
-        let reser = to_string(val).expect("Value did not serialize to IDM");
-
-        if self.allow_inexact_reserialization {
-            // Reserialization may differ from original IDM (different order
-            // of fields, removed comments etc).
-            let new_deser = from_str::<T>(&reser)
-                .expect("Serialized IDM did not deserialize to type");
-            // It must still deserialize to same value.
-            assert_eq!(&new_deser, val);
-        } else {
-            // Reserialization must be the same as the original IDM.
-            // In this case it should be safe to assume reserialization also
-            // deserializes the same way.
-            assert_eq!(idm, reser.trim_end());
-        }
-    }
-}
-
-// Convenience wrapper for fluent test.
-fn test<T>(idm: &str, val: &T)
-where
-    T: PartialEq + fmt::Debug + serde::Serialize + serde::de::DeserializeOwned,
-{
-    TestCase::default().test(idm, val);
-}
-
-fn test_inexact<T>(idm: &str, val: &T)
-where
-    T: PartialEq + fmt::Debug + serde::Serialize + serde::de::DeserializeOwned,
-{
-    TestCase::inexact().test(idm, val);
-}
-
-// Conveninence constructor for String literals.
-fn s(s: &str) -> String {
-    s.to_string()
-}
-
 #[test]
 fn test_atom() {
     test("123", &123u32);
@@ -549,4 +488,47 @@ s("rechtsschutzversicherungsgesellschaften")],
 y: s("a"),
         },
     );
+}
+
+////////////////////////////////
+// Helper functions
+
+/// Test that deserialization matches value and serialization matches IDM.
+fn test<T>(idm: &str, val: &T)
+where
+    T: PartialEq + fmt::Debug + serde::Serialize + serde::de::DeserializeOwned,
+{
+    let deser =
+        from_str::<T>(idm).expect("IDM did not deserialize to type");
+    assert_eq!(&deser, val);
+
+    let reser = to_string(val).expect("Value did not serialize to IDM");
+    assert_eq!(idm, reser.trim_end());
+}
+
+/// Test that deserialization matches value and value's serialization
+/// deserializes to value.
+///
+/// Use this version for IDM that does not reserialize the exact same way it
+/// is written.
+fn test_inexact<T>(idm: &str, val: &T)
+where
+    T: PartialEq + fmt::Debug + serde::Serialize + serde::de::DeserializeOwned,
+{
+    let deser =
+        from_str::<T>(idm).expect("IDM did not deserialize to type");
+    assert_eq!(&deser, val);
+
+    let reser = to_string(val).expect("Value did not serialize to IDM");
+    // Reserialization may differ from original IDM (different order
+    // of fields, removed comments etc).
+    let new_deser = from_str::<T>(&reser)
+        .expect("Serialized IDM did not deserialize to type");
+    // It must still deserialize to same value.
+    assert_eq!(&new_deser, val);
+}
+
+// Conveninence constructor for String literals.
+fn s(s: &str) -> String {
+    s.to_string()
 }
