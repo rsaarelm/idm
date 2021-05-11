@@ -233,7 +233,25 @@ A
 
 #[test]
 fn test_comma_escape() {
-    test_inexact::<Vec<String>>("\t,,\n,\n\tfoo", &vec![s(","), s("foo")]);
+    // Standalone string (not sequence), no escaping
+    test(",", &s(","));
+
+    // Line mode, must escape comma
+    test_inexact::<Vec<String>>(
+        "\
+,,
+foo",
+        &vec![s(","), s("foo")],
+    );
+
+    // Paragraph mode, comma as is
+    test_inexact::<Vec<String>>(
+        "\
+\t,
+,
+\tfoo",
+        &vec![s(","), s("foo")],
+    );
 
     test(
         "\
@@ -498,8 +516,7 @@ fn test<T>(idm: &str, val: &T)
 where
     T: PartialEq + fmt::Debug + serde::Serialize + serde::de::DeserializeOwned,
 {
-    let deser =
-        from_str::<T>(idm).expect("IDM did not deserialize to type");
+    let deser = from_str::<T>(idm).expect("IDM did not deserialize to type");
     assert_eq!(&deser, val);
 
     let reser = to_string(val).expect("Value did not serialize to IDM");
@@ -515,8 +532,7 @@ fn test_inexact<T>(idm: &str, val: &T)
 where
     T: PartialEq + fmt::Debug + serde::Serialize + serde::de::DeserializeOwned,
 {
-    let deser =
-        from_str::<T>(idm).expect("IDM did not deserialize to type");
+    let deser = from_str::<T>(idm).expect("IDM did not deserialize to type");
     assert_eq!(&deser, val);
 
     let reser = to_string(val).expect("Value did not serialize to IDM");

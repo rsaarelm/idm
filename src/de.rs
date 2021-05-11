@@ -23,7 +23,9 @@ enum ParsingMode {
     Block,
     /// Up to the end of the current line only, even if there are more
     /// indented lines after this.
-    Line,
+    ///
+    /// Flag set to true means commas should be escaped
+    Line(bool),
     /// Single whitespace-separated token. Do not move to next line.
     Word,
     /// Single whitespace-separated token, must have form "key-name:" (valid
@@ -97,7 +99,7 @@ impl<'de> Deserializer<'de> {
                     && (self.cursor.has_headline(self.current_depth)
                         || self.cursor.has_body_content(self.current_depth))
             }
-            Line | Word | Key(_) => {
+            Line(_) | Word | Key(_) => {
                 self.cursor.has_headline_content(self.current_depth)
             }
         }
@@ -120,7 +122,15 @@ impl<'de> Deserializer<'de> {
                 let block = self.cursor.line_or_block(self.current_depth)?;
                 Ok(Cow::from(block))
             }
-            Line => Ok(Cow::from(self.cursor.line()?)),
+            Line(true) => {
+                let line = self.cursor.line()?;
+                if !line.is_empty() && line.chars().all(|c| c == ',') {
+                    Ok(Cow::from(&line[1..]))
+                } else {
+                    Ok(Cow::from(line))
+                }
+            }
+            Line(false) => Ok(Cow::from(self.cursor.line()?)),
             Word => Ok(Cow::from(self.cursor.word()?)),
             Key(emit_dummy_key) => {
                 let key = if emit_dummy_key {
@@ -288,7 +298,7 @@ impl<'a, 'de> de::Deserializer<'de> for &'a mut Deserializer<'de> {
             // The hairy magic bit: If we're at the start of a tuple, force
             // line mode here. An empty headline will be read as the tuple
             // value instead of a signal to enter block mode.
-            self.mode = ParsingMode::Line;
+            self.mode = ParsingMode::Line(true);
             self.delayed_enter_body_requested = false;
         } else if self.mode.is_inline() {
             // We can't parse a None value in inline mode because there's no
@@ -300,11 +310,12 @@ impl<'a, 'de> de::Deserializer<'de> for &'a mut Deserializer<'de> {
             visitor.visit_some(self)
         } else {
             // XXX: Ugly guarantee that empty-marker gets consumed.
-            if self.mode == ParsingMode::Line
-                && self.cursor.clone().verbatim_line(self.current_depth)
+            if let ParsingMode::Line(_) = self.mode {
+                if self.cursor.clone().verbatim_line(self.current_depth)
                     == Ok(",")
-            {
-                let _ = self.cursor.line();
+                {
+                    let _ = self.cursor.line();
+                }
             }
             visitor.visit_none()
         }
@@ -351,7 +362,7 @@ impl<'a, 'de> de::Deserializer<'de> for &'a mut Deserializer<'de> {
         }
 
         match self.mode {
-            ParsingMode::Line | ParsingMode::Word | ParsingMode::Key(_) => {
+            ParsingMode::Line(_) | ParsingMode::Word | ParsingMode::Key(_) => {
                 return err!("Nested sequence found in inline sequence");
             }
             _ => {}
@@ -393,7 +404,7 @@ impl<'a, 'de> de::Deserializer<'de> for &'a mut Deserializer<'de> {
         }
 
         match self.mode {
-            ParsingMode::Line | ParsingMode::Word | ParsingMode::Key(_) => {
+            ParsingMode::Line(_) | ParsingMode::Word | ParsingMode::Key(_) => {
                 return err!("Nested sequence in inline sequence");
             }
             _ => {}
@@ -412,7 +423,7 @@ impl<'a, 'de> de::Deserializer<'de> for &'a mut Deserializer<'de> {
         // The flag for deferred body entering will be flipped in
         // next_element_seed.
         } else {
-            self.mode = ParsingMode::Line;
+            self.mode = ParsingMode::Line(false);
         }
 
         visitor.visit_seq(Sequence::new(self).tuple_length(len))
@@ -435,7 +446,7 @@ impl<'a, 'de> de::Deserializer<'de> for &'a mut Deserializer<'de> {
         V: de::Visitor<'de>,
     {
         match self.mode {
-            ParsingMode::Line | ParsingMode::Word | ParsingMode::Key(_) => {
+            ParsingMode::Line(_) | ParsingMode::Word | ParsingMode::Key(_) => {
                 return err!("deserialize_struct: Can't nest in inline seq");
             }
             _ => {}
@@ -455,7 +466,7 @@ impl<'a, 'de> de::Deserializer<'de> for &'a mut Deserializer<'de> {
         V: de::Visitor<'de>,
     {
         match self.mode {
-            ParsingMode::Line | ParsingMode::Word | ParsingMode::Key(_) => {
+            ParsingMode::Line(_) | ParsingMode::Word | ParsingMode::Key(_) => {
                 return err!("deserialize_struct: Can't nest in inline seq");
             }
             _ => {}
@@ -584,7 +595,7 @@ impl<'a, 'de> de::SeqAccess<'de> for Sequence<'a, 'de> {
 
             // Only ever parse the first item in Line mode, dive in and start
             // doing block from then on.
-            if self.de.mode == ParsingMode::Line {
+            if let ParsingMode::Line(_) = self.de.mode {
                 self.de.mode = ParsingMode::Block;
 
                 if self.de.cursor.at_empty_line() {
@@ -703,7 +714,7 @@ impl<'a, 'de> de::MapAccess<'de> for Sequence<'a, 'de> {
             if self.de.cursor.is_section(self.de.current_depth) {
                 // Has both headline and body.
                 // Assume full headline is key, body is content.
-                self.de.mode = ParsingMode::Line;
+                self.de.mode = ParsingMode::Line(false);
             } else {
                 // Has no body. Assume first headline word is key, rest of
                 // headline is value.
@@ -724,7 +735,7 @@ impl<'a, 'de> de::MapAccess<'de> for Sequence<'a, 'de> {
     where
         V: de::DeserializeSeed<'de>,
     {
-        let need_exit = if self.de.mode == ParsingMode::Line {
+        let need_exit = if let ParsingMode::Line(_) = self.de.mode {
             self.de.mode = ParsingMode::Block;
             true
         } else {
