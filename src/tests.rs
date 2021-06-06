@@ -1,7 +1,9 @@
 use crate::{from_str, outline, to_string};
 use pretty_assertions::assert_eq;
 use serde_derive::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::fmt;
+use std::iter::FromIterator;
 
 type Outline = outline::Outline<Option<String>>;
 
@@ -364,13 +366,74 @@ B",
             _contents: vec![s("A"), s("B")],
         },
     );
+
+    #[derive(Clone, Eq, PartialEq, Default, Debug, Serialize, Deserialize)]
+    struct Recursive {
+        #[serde(default, skip_serializing_if = "is_default")]
+        a: i32,
+        #[serde(default)]
+        _contents: BTreeMap<String, Recursive>,
+    }
+
+    test(
+        "\
+a: 1
+x
+	a: 2",
+        &Recursive {
+            a: 1,
+            _contents: BTreeMap::from_iter(vec![(
+                "x".to_string(),
+                Recursive {
+                    a: 2,
+                    ..Default::default()
+                },
+            )]),
+        },
+    );
+
+    test(
+        "\
+item
+	a: 1",
+        &Recursive {
+            a: 0,
+            _contents: BTreeMap::from_iter(vec![(
+                "item".to_string(),
+                Recursive {
+                    a: 1,
+                    ..Default::default()
+                },
+            )]),
+        },
+    );
+
+    test(
+        "\
+items
+	item
+		a: 1",
+        &Recursive {
+            a: 0,
+            _contents: BTreeMap::from_iter(vec![(
+                "items".to_string(),
+                Recursive {
+                    a: 0,
+                    _contents: BTreeMap::from_iter(vec![(
+                        "item".to_string(),
+                        Recursive {
+                            a: 1,
+                            ..Default::default()
+                        },
+                    )]),
+                },
+            )]),
+        },
+    );
 }
 
 #[test]
 fn test_nesting_contents() {
-    use std::collections::BTreeMap;
-    use std::iter::FromIterator;
-
     const STARMAP: &str = "\
 Sol
 	age: 4.6e9
@@ -547,4 +610,8 @@ where
 // Conveninence constructor for String literals.
 fn s(s: &str) -> String {
     s.to_string()
+}
+
+pub fn is_default<T: Default + Eq>(a: &T) -> bool {
+    a == &Default::default()
 }
