@@ -64,6 +64,34 @@ impl<'a> Cursor<'a> {
         self.clone().headline(depth).ok().is_some()
     }
 
+    /// Like headline, but does not escape commas.
+    pub fn remaining_line(&mut self, depth: i32) -> Result<Option<&str>> {
+        if self.input.is_empty() {
+            return err!("headline: Out of input");
+        }
+
+        if let Some(line_depth) = self.line_depth() {
+            if line_depth > depth {
+                return Ok(None);
+            } else if line_depth < depth {
+                return err!("headline: Above given depth");
+            }
+        } else {
+            // Consume the empty line.
+            self.line()?;
+            return Ok(Some(""));
+        }
+
+        self.skip_indentation();
+
+        let line = self.line()?.trim_end();
+        Ok(Some(line))
+    }
+
+    pub fn has_remaining_line(&self, depth: i32) -> bool {
+        self.clone().remaining_line(depth).ok().is_some()
+    }
+
     pub fn has_headline_content(&self, depth: i32) -> bool {
         self.clone()
             .headline(depth)
@@ -177,10 +205,18 @@ impl<'a> Cursor<'a> {
     ///
     /// An element with both a headline with content and body lines will
     /// result an error.
-    pub fn line_or_block(&mut self, depth: i32) -> Result<String> {
+    pub fn line_or_block(
+        &mut self,
+        depth: i32,
+        escape_comma: bool,
+    ) -> Result<String> {
         let has_body = self.has_body_content(depth);
 
-        if let Some(s) = self.headline(depth)? {
+        if let Some(s) = if escape_comma {
+            self.headline(depth)?
+        } else {
+            self.remaining_line(depth)?
+        } {
             if !s.is_empty() {
                 if has_body {
                     return err!(

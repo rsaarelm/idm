@@ -20,7 +20,9 @@ where
 enum ParsingMode {
     /// The most common parsing mode, up to the next element with the same or
     /// higher indent than the current point.
-    Block,
+    ///
+    /// Flag set to true means commas should be escaped
+    Block(bool),
     /// Up to the end of the current line only, even if there are more
     /// indented lines after this.
     ///
@@ -40,6 +42,14 @@ enum ParsingMode {
 }
 
 impl ParsingMode {
+    fn is_block(self) -> bool {
+        use ParsingMode::*;
+        match self {
+            Block(_) => true,
+            _ => false,
+        }
+    }
+
     fn is_inline(self) -> bool {
         use ParsingMode::*;
         match self {
@@ -77,7 +87,7 @@ impl<'de> Deserializer<'de> {
             // input. Since input's baseline indent is 0, our starting indent
             // for the dummy construct around it is -1.
             current_depth: -1,
-            mode: ParsingMode::Block,
+            mode: ParsingMode::Block(true),
             seq_pos: None,
             delayed_enter_body_requested: false,
         }
@@ -92,11 +102,16 @@ impl<'de> Deserializer<'de> {
     fn has_next_token(&mut self) -> bool {
         use ParsingMode::*;
         match self.mode {
-            Block => {
+            Block(escape_commas) => {
+                let has_headline = if escape_commas {
+                    self.cursor.has_headline(self.current_depth)
+                } else {
+                    self.cursor.has_remaining_line(self.current_depth)
+                };
                 self.cursor
                     .line_depth()
                     .map_or(true, |n| n >= self.current_depth)
-                    && (self.cursor.has_headline(self.current_depth)
+                    && (has_headline
                         || self.cursor.has_body_content(self.current_depth))
             }
             Line(_) | Word | Key(_) => {
@@ -118,8 +133,10 @@ impl<'de> Deserializer<'de> {
 
         use ParsingMode::*;
         match self.mode {
-            Block => {
-                let block = self.cursor.line_or_block(self.current_depth)?;
+            Block(escape_comma) => {
+                let block = self
+                    .cursor
+                    .line_or_block(self.current_depth, escape_comma)?;
                 Ok(Cow::from(block))
             }
             Line(true) => {
@@ -130,7 +147,9 @@ impl<'de> Deserializer<'de> {
                     Ok(Cow::from(line))
                 }
             }
-            Line(false) => Ok(Cow::from(self.cursor.line()?)),
+            Line(false) => {
+                Ok(Cow::from(self.cursor.line()?))
+            }
             Word => Ok(Cow::from(self.cursor.word()?)),
             Key(emit_dummy_key) => {
                 let key = if emit_dummy_key {
@@ -139,7 +158,11 @@ impl<'de> Deserializer<'de> {
                     self.cursor.key()
                 };
                 // Keys are always a one-shot parse.
-                self.mode = Block;
+                //
+                // Set block mode to not escaping commas, since the "headline"
+                // will be on the already prefixed by the key line as the key
+                // instead of on its own line and there
+                self.mode = Block(false);
                 Ok(Cow::from(key?))
             }
         }
@@ -387,7 +410,7 @@ impl<'a, 'de> de::Deserializer<'de> for &'a mut Deserializer<'de> {
         if is_inline {
             self.mode = ParsingMode::Word;
         } else {
-            self.mode = ParsingMode::Block;
+            self.mode = ParsingMode::Block(true);
             self.enter_body()?;
         }
 
@@ -416,7 +439,7 @@ impl<'a, 'de> de::Deserializer<'de> for &'a mut Deserializer<'de> {
         if is_inline && !is_outline {
             self.mode = ParsingMode::Word;
         } else if !is_inline && is_outline {
-            self.mode = ParsingMode::Block;
+            self.mode = ParsingMode::Block(true);
         // Can't enter body yet, because if the first field turns out to
         // be Option, we need to backtrack into Line mode.
         //
@@ -585,7 +608,7 @@ impl<'a, 'de> de::SeqAccess<'de> for Sequence<'a, 'de> {
             // so that Option head value can cancel the deferral.
             if self.tuple_length.is_some()
                 && self.idx == 0
-                && self.de.mode == ParsingMode::Block
+                && self.de.mode.is_block()
             {
                 self.de.delayed_enter_body_requested = true;
             }
@@ -596,7 +619,7 @@ impl<'a, 'de> de::SeqAccess<'de> for Sequence<'a, 'de> {
             // Only ever parse the first item in Line mode, dive in and start
             // doing block from then on.
             if let ParsingMode::Line(_) = self.de.mode {
-                self.de.mode = ParsingMode::Block;
+                self.de.mode = ParsingMode::Block(true);
 
                 if self.de.cursor.at_empty_line() {
                     // Enter body would consume an empty line as headline.
@@ -639,7 +662,7 @@ impl<'a, 'de> de::SeqAccess<'de> for Sequence<'a, 'de> {
                             self.de.exit_body()?;
                         }
                     }
-                    self.de.mode = ParsingMode::Block;
+                    self.de.mode = ParsingMode::Block(true);
                     self.de.seq_pos = None;
                 }
             }
@@ -654,7 +677,7 @@ impl<'a, 'de> de::SeqAccess<'de> for Sequence<'a, 'de> {
                     self.de.exit_body()?;
                 }
             }
-            self.de.mode = ParsingMode::Block;
+            self.de.mode = ParsingMode::Block(true);
             self.de.seq_pos = None;
             Ok(None)
         }
@@ -726,7 +749,7 @@ impl<'a, 'de> de::MapAccess<'de> for Sequence<'a, 'de> {
         // If we're in word mode, drop out of it, first headline item was
         // parsed as key, but the entire rest of the line needs to be value.
         if self.de.mode == ParsingMode::Word {
-            self.de.mode = ParsingMode::Block;
+            self.de.mode = ParsingMode::Block(false);
         }
         ret
     }
@@ -736,7 +759,7 @@ impl<'a, 'de> de::MapAccess<'de> for Sequence<'a, 'de> {
         V: de::DeserializeSeed<'de>,
     {
         let need_exit = if let ParsingMode::Line(_) = self.de.mode {
-            self.de.mode = ParsingMode::Block;
+            self.de.mode = ParsingMode::Block(false);
             true
         } else {
             false

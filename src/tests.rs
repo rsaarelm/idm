@@ -326,29 +326,29 @@ unexpected: stuff"
     .is_err());
 
     /*
-    XXX: Does not currently work, see https://github.com/serde-rs/serde/issues/1346
-    FIXME if the Serde issue gets resolved.
+        XXX: Does not currently work, see https://github.com/serde-rs/serde/issues/1346
+        FIXME if the Serde issue gets resolved.
 
-    #[derive(Clone, Eq, PartialEq, Default, Debug, Serialize, Deserialize)]
-    struct Nested {
-        #[serde(flatten)]
-        simple: Simple,
-    }
+        #[derive(Clone, Eq, PartialEq, Default, Debug, Serialize, Deserialize)]
+        struct Nested {
+            #[serde(flatten)]
+            simple: Simple,
+        }
 
-    test(
-        "\
-name-text: Foo bar
-x: 1
-y: 2",
-        &Nested {
-            simple: Simple {
-                name_text: s("Foo bar"),
-                x: 1,
-                y: 2,
+        test(
+            "\
+    name-text: Foo bar
+    x: 1
+    y: 2",
+            &Nested {
+                simple: Simple {
+                    name_text: s("Foo bar"),
+                    x: 1,
+                    y: 2,
+                },
             },
-        },
-    );
-    */
+        );
+        */
 }
 
 #[test]
@@ -593,6 +593,19 @@ s("betäubungsmittelverschreibungsverordnung"),
 s("rechtsschutzversicherungsgesellschaften")],
 y: s("a"),
         },
+    );
+}
+
+#[test]
+fn test_comma_value() {
+    #[derive(Eq, PartialEq, Debug, Serialize, Deserialize)]
+    pub struct Ch {
+        c: char,
+    }
+    test(
+        "\
+c: ,",
+        &Ch { c: ',' },
     );
 }
 
