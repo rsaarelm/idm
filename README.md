@@ -225,6 +225,14 @@ be a single section with a missing headline at line -1 and depth -1.
 of a tuple for the canonical outline type, not standalone. Most of IDM doesn't
 have good facilities for expressing empty values.
 
+## Notes
+
+Serde's struct flattening `#[serde(flatten)]` attribute does not work well
+with IDM. It switches from struct-like parsing to map-like parsing, and those
+are syntactically different in IDM. A struct-like flatten operator is
+currently an [unresolved issue](https://github.com/serde-rs/serde/issues/1346)
+with Serde.
+
 ## License
 
 IDM is dual-licensed under Apache-2.0 and MIT.
