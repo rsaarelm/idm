@@ -457,6 +457,42 @@ items
     );
 }
 
+// FIXME: Get this working
+//#[test]
+fn test_oneshot_section() {
+    #[derive(Clone, Eq, PartialEq, Default, Debug, Serialize, Deserialize)]
+    struct Data {
+        x: i32,
+        y: i32,
+    }
+
+    test(
+        "\
+Headline
+\tx: 1
+\ty: 2",
+        &vec![("Headline".to_string(), Data {x: 1, y: 2})]
+    );
+}
+
+// FIXME: Get this working
+//#[test]
+fn test_oneshot_section_opt() {
+    #[derive(Clone, Eq, PartialEq, Default, Debug, Serialize, Deserialize)]
+    struct Data {
+        x: i32,
+        y: i32,
+    }
+
+    test(
+        "\
+Headline
+\tx: 1
+\ty: 2",
+        &vec![(Some("Headline".to_string()), Data {x: 1, y: 2})]
+    );
+}
+
 #[test]
 fn test_nesting_contents() {
     const STARMAP: &str = "\
