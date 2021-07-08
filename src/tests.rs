@@ -404,7 +404,7 @@ B",
         "\
 a: 1
 x
-	a: 2",
+\ta: 2",
         &Recursive {
             a: 1,
             _contents: BTreeMap::from_iter(vec![(
@@ -420,7 +420,7 @@ x
     test(
         "\
 item
-	a: 1",
+\ta: 1",
         &Recursive {
             a: 0,
             _contents: BTreeMap::from_iter(vec![(
@@ -436,8 +436,8 @@ item
     test(
         "\
 items
-	item
-		a: 1",
+\titem
+\t\ta: 1",
         &Recursive {
             a: 0,
             _contents: BTreeMap::from_iter(vec![(
@@ -461,29 +461,29 @@ items
 fn test_nesting_contents() {
     const STARMAP: &str = "\
 Sol
-	age: 4.6e9
-	mass: 1.0
-	Mercury
-		orbit: 0.39
-		mass: 0.055
-	Venus
-		orbit: 0.72
-		mass: 0.815
-	Earth
-		orbit: 1.0
-		mass: 1.0
-	Mars
-		orbit: 1.52
-		mass: 0.1
+\tage: 4.6e9
+\tmass: 1.0
+\tMercury
+\t\torbit: 0.39
+\t\tmass: 0.055
+\tVenus
+\t\torbit: 0.72
+\t\tmass: 0.815
+\tEarth
+\t\torbit: 1.0
+\t\tmass: 1.0
+\tMars
+\t\torbit: 1.52
+\t\tmass: 0.1
 Alpha Centauri
-	age: 5.3e9
-	mass: 1.1
-	Eurytion
-		orbit: 0.47
-		mass: 0.08
-	Chiron
-		orbit: 1.32
-		mass: 1.33";
+\tage: 5.3e9
+\tmass: 1.1
+\tEurytion
+\t\torbit: 0.47
+\t\tmass: 0.08
+\tChiron
+\t\torbit: 1.32
+\t\tmass: 1.33";
 
     #[derive(Clone, PartialEq, Default, Debug, Serialize, Deserialize)]
     struct Star {
@@ -569,9 +569,9 @@ y: a",
     test(
         "\
 x:
-	rindfleischetikettierungsüberwachungsaufgabenübertragungsgesetz
-	betäubungsmittelverschreibungsverordnung
-	rechtsschutzversicherungsgesellschaften
+\trindfleischetikettierungsüberwachungsaufgabenübertragungsgesetz
+\tbetäubungsmittelverschreibungsverordnung
+\trechtsschutzversicherungsgesellschaften
 y: a",
         &List {
             x: vec![
