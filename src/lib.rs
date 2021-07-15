@@ -8,6 +8,8 @@ pub use error::{Error, Result};
 
 mod outline;
 
+mod parser;
+
 mod ser;
 pub use ser::to_string;
 
