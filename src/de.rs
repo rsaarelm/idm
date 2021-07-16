@@ -82,7 +82,7 @@ pub struct Deserializer<'de> {
 impl<'de> Deserializer<'de> {
     pub fn new(input: &'de str) -> Deserializer<'de> {
         Deserializer {
-            cursor: input.into(),
+            cursor: Cursor::new(input),
             // Start at the head of a dummy section encompassing the whole
             // input. Since input's baseline indent is 0, our starting indent
             // for the dummy construct around it is -1.

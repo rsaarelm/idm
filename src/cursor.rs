@@ -1,23 +1,48 @@
-use crate::err;
-use crate::error::Result;
+use crate::{err, error::Result, parser};
+
+// TODO: New Result type to use with Cursor
+// pub type Result<'a, T> =
+//     std::result::Result<(T, Cursor<'a>), crate::error::Error>;
 
 /// Low-level text processing for deserializer.
-#[derive(Copy, Clone)]
+#[derive(Clone)]
 pub struct Cursor<'a> {
-    /// At the start of the current input line.
-    line_start: &'a str,
     /// At the start of the next input token on current line.
     input: &'a str,
+
+    // New stuff, these become the new cursor
+    /// Current stack of indentation whitespace strings.
+    current_indent: Vec<&'a str>,
+    /// Expected indent level. Same format as `current_indent`
+    ///
+    /// The shared prefix of current and expected indent must always be
+    /// identical. Expected indent level must be synced with current intent
+    /// before parsing can continue.
+    expected_indent: Vec<&'a str>,
+    /// Line number of current input line.
+    line: usize,
+
+    // Old cursor stuff, deprecated, remove
+    /// At the start of the current input line.
+    line_start: &'a str,
 }
 
-impl<'a> From<&'a str> for Cursor<'a> {
-    fn from(s: &'a str) -> Self {
+impl<'a> Cursor<'a> {
+    pub fn new(s: &'a str) -> Self {
         Cursor {
             line_start: s,
             input: s,
+
+            current_indent: Vec::new(),
+            expected_indent: Vec::new(),
+            line: 0,
         }
     }
 }
+
+////////////////////////////////
+// V01 cursor logic
+// Deprecated. Get rid of this when V02 is working.
 
 impl<'a> Cursor<'a> {
     /// Read headline at current position given a depth.
@@ -141,7 +166,7 @@ impl<'a> Cursor<'a> {
         );
         assert!(depth >= 0, "Can't construct line for depth -1");
 
-        if let Ok((line, rest)) = split_line(self.line_start) {
+        if let Ok((line, rest)) = parser::line(self.line_start) {
             let result = if let Some(line_depth) = self.line_depth() {
                 if line_depth >= depth {
                     &line[(depth as usize)..]
@@ -246,35 +271,9 @@ impl<'a> Cursor<'a> {
         // found.
         let mut cursor = self.clone();
         cursor.skip_indentation();
-
-        // Eat whitespace before word.
-        while let Some(c) = cursor.input.chars().next() {
-            if c == '\n' {
-                return err!("word: End of line");
-            } else if c.is_whitespace() {
-                cursor.input = &cursor.input[c.len_utf8()..];
-            } else {
-                break;
-            }
-        }
-        if self.input == "" {
-            return err!("word: No input left");
-        }
-
-        let mut end_pos = cursor.input.len();
-        for (i, c) in cursor.input.char_indices() {
-            if c.is_whitespace() {
-                end_pos = i;
-                break;
-            }
-        }
-
-        let ret = &cursor.input[..end_pos];
-        debug_assert!(!ret.is_empty(), "word: Trying to return empty word");
-        cursor.input = &cursor.input[end_pos..];
+        let word = parser::read(&mut cursor.input, parser::word)?;
         *self = cursor;
-
-        Ok(ret)
+        Ok(word)
     }
 
     /// Read attribute key from input.
@@ -283,21 +282,9 @@ impl<'a> Cursor<'a> {
     /// to camel_case. So "foo-bar:" becomes "foo_bar".
     pub fn key(&mut self) -> Result<String> {
         let mut cursor = self.clone();
-        let word = cursor.word()?;
-        if !word.ends_with(":") || word == ":" {
-            return err!("key: Invalid syntax {:?}", word);
-        }
-        let word = &word[..(word.len() - 1)]; //  Drop the trailing ':'.
-        let word = word.replace("-", "_"); //     Convert to camel_case.
+        cursor.skip_indentation();
+        let word = parser::read(&mut cursor.input, parser::key)?;
         *self = cursor;
-        // Eat whitespace.
-        while let Some(c) = self.input.chars().next() {
-            if c.is_whitespace() && c != '\n' {
-                self.input = &self.input[c.len_utf8()..];
-            } else {
-                break;
-            }
-        }
         Ok(word)
     }
 
@@ -309,7 +296,7 @@ impl<'a> Cursor<'a> {
         let mut cursor = self.clone();
         cursor.skip_indentation();
 
-        if let Ok((line, rest)) = split_line(cursor.input) {
+        if let Ok((line, rest)) = parser::line(cursor.input) {
             *self = cursor;
             self.line_start = rest;
             self.input = rest;
@@ -323,7 +310,7 @@ impl<'a> Cursor<'a> {
     ///
     /// Line depth does not make sense for blank lines, so those get `None`.
     pub fn line_depth(&self) -> Option<i32> {
-        if let Ok((line, _)) = split_line(self.line_start) {
+        if let Ok((line, _)) = parser::line(self.line_start) {
             if line.chars().all(|c| c.is_whitespace()) {
                 None
             } else {
@@ -352,28 +339,3 @@ impl<'a> Cursor<'a> {
         }
     }
 }
-
-type ParseResult<'a> = std::result::Result<(&'a str, &'a str), &'a str>;
-
-/// Return next line and rest of the input after newline.
-fn split_line(s: &'_ str) -> ParseResult<'_> {
-    if s == "" {
-        Err(s)
-    } else {
-        let p = s.find('\n').unwrap_or(s.len());
-        Ok((&s[..p], &s[(p + 1).min(s.len())..]))
-    }
-}
-
-/* TODO Comments
-
-/// Return line without a "-- text" trailing comment, if it has one.
-fn strip_comment(line: &str) -> &str {
-    if let Some(idx) = line.find("--") {
-        &line[..idx].trim_end()
-    } else {
-        line
-    }
-}
-
-*/
