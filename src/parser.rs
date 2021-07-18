@@ -197,9 +197,13 @@ pub fn blank_line(input: &str) -> Result<()> {
 }
 
 /// Parse a line only if it has more indented child lines.
+///
+/// On success, return the headline and the new indent string for the first
+/// non-empty child line. Leave cursor at the start of the line after the
+/// headline.
 pub fn headline<'a, 'b>(
     current_indent: &'b Vec<&'a str>,
-) -> impl Fn(&'a str) -> Result<'a, &'a str> + 'b {
+) -> impl Fn(&'a str) -> Result<'a, (&'a str, Vec<&'a str>)> + 'b {
     move |input| {
         let (ret, rest) = line(input)?;
         let mut pos = rest;
@@ -217,7 +221,7 @@ pub fn headline<'a, 'b>(
 
             let indent = indentations(current_indent)(pos)?.0;
             return if indent.len() > current_indent.len() {
-                Ok((ret, rest))
+                Ok(((ret, indent), rest))
             } else {
                 Err(input)
             };
@@ -486,11 +490,11 @@ b"), Err("a\n\nb"));
 
         assert_eq!(headline(&vec![])("\
 a
-  b"), Ok(("a", "  b")));
+  b"), Ok((("a", vec!["  "]), "  b")));
 
         assert_eq!(headline(&vec![])("\
 a
 
-  b"), Ok(("a", "\n  b")));
+  b"), Ok((("a", vec!["  "]), "\n  b")));
     }
 }
