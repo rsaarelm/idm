@@ -38,6 +38,27 @@ impl<'a> Cursor<'a> {
             line_number: 0,
         }
     }
+
+    /// Format error from parse into an actual error value.
+    fn err<'b>(&'b self, msg: &'b str) -> impl Fn(&str) -> Error + 'b {
+        move |remaining_input| {
+            debug_assert_eq!(
+                &self.input[self.input.len() - remaining_input.len()..],
+                remaining_input,
+                "Malformed remaining input slice from parser"
+            );
+
+            // Find out how much ahead of the current line number the error
+            // site is.
+            let line_number = self.line_number
+                + self.input[..self.input.len() - remaining_input.len()]
+                    .chars()
+                    .filter(|&c| c == '\n')
+                    .count();
+
+            Error(format!("Line {}: {}", line_number, msg))
+        }
+    }
 }
 
 ////////////////////////////////
@@ -338,27 +359,6 @@ impl<'a> Cursor<'a> {
     fn skip_indentation(&mut self) {
         while self.input.chars().next() == Some('\t') {
             self.input = &self.input[1..];
-        }
-    }
-
-    /// Format error from parse into an actual error value.
-    fn err<'b>(&'b self, msg: &'b str) -> impl Fn(&str) -> Error + 'b {
-        move |remaining_input| {
-            debug_assert_eq!(
-                &self.input[self.input.len() - remaining_input.len()..],
-                remaining_input,
-                "Malformed remaining input slice from parser"
-            );
-
-            // Find out how much ahead of the current line number the error
-            // site is.
-            let line_number = self.line_number
-                + self.input[..self.input.len() - remaining_input.len()]
-                    .chars()
-                    .filter(|&c| c == '\n')
-                    .count();
-
-            Error(format!("Line {}: {}", line_number, msg))
         }
     }
 }
