@@ -1,4 +1,4 @@
-use crate::{err, error::Result, parser};
+use crate::{err, error::Error, error::Result, parser};
 
 // TODO: New Result type to use with Cursor
 // pub type Result<'a, T> =
@@ -20,7 +20,7 @@ pub struct Cursor<'a> {
     /// before parsing can continue.
     expected_indent: Vec<&'a str>,
     /// Line number of current input line.
-    line: usize,
+    line_number: usize,
 
     // Old cursor stuff, deprecated, remove
     /// At the start of the current input line.
@@ -35,7 +35,7 @@ impl<'a> Cursor<'a> {
 
             current_indent: Vec::new(),
             expected_indent: Vec::new(),
-            line: 0,
+            line_number: 0,
         }
     }
 }
@@ -271,7 +271,8 @@ impl<'a> Cursor<'a> {
         // found.
         let mut cursor = self.clone();
         cursor.skip_indentation();
-        let word = parser::read(&mut cursor.input, parser::word)?;
+        let word = parser::read(&mut cursor.input, parser::word)
+            .map_err(self.err("Expected word"))?;
         *self = cursor;
         Ok(word)
     }
@@ -283,7 +284,8 @@ impl<'a> Cursor<'a> {
     pub fn key(&mut self) -> Result<String> {
         let mut cursor = self.clone();
         cursor.skip_indentation();
-        let word = parser::read(&mut cursor.input, parser::key)?;
+        let word = parser::read(&mut cursor.input, parser::key)
+            .map_err(self.err("Expected key"))?;
         *self = cursor;
         Ok(word)
     }
@@ -336,6 +338,27 @@ impl<'a> Cursor<'a> {
     fn skip_indentation(&mut self) {
         while self.input.chars().next() == Some('\t') {
             self.input = &self.input[1..];
+        }
+    }
+
+    /// Format error from parse into an actual error value.
+    fn err<'b>(&'b self, msg: &'b str) -> impl Fn(&str) -> Error + 'b {
+        move |remaining_input| {
+            debug_assert_eq!(
+                &self.input[self.input.len() - remaining_input.len()..],
+                remaining_input,
+                "Malformed remaining input slice from parser"
+            );
+
+            // Find out how much ahead of the current line number the error
+            // site is.
+            let line_number = self.line_number
+                + self.input[..self.input.len() - remaining_input.len()]
+                    .chars()
+                    .filter(|&c| c == '\n')
+                    .count();
+
+            Error(format!("Line {}: {}", line_number, msg))
         }
     }
 }

@@ -1,14 +1,12 @@
 //! Stateless parsing primitives
 
-use crate::{err, error::Error};
-
-type Result<'a, T> = std::result::Result<(T, &'a str), Error>;
+type Result<'a, T> = std::result::Result<(T, &'a str), &'a str>;
 
 /// Read item from mutable slice, update slice if read was successful.
 pub fn read<'a, T>(
     s: &mut &'a str,
     item: impl Fn(&'a str) -> Result<T>,
-) -> crate::error::Result<T> {
+) -> std::result::Result<T, &'a str> {
     item(*s).map(|(ret, rest)| {
         *s = rest;
         ret
@@ -21,7 +19,7 @@ pub fn read<'a, T>(
 /// Consume whitespace after the word.
 pub fn word(input: &str) -> Result<&str> {
     if input.chars().next().map_or(true, |c| c.is_whitespace()) {
-        return err!("word: No text content");
+        return Err(input);
     }
 
     let mut end_pos = input.len();
@@ -53,7 +51,7 @@ pub fn word(input: &str) -> Result<&str> {
 /// Fails if there is no input.
 pub fn line(input: &str) -> Result<&str> {
     if input == "" {
-        err!("line: End of input")
+        Err(input)
     } else {
         let p = input.find('\n').unwrap_or(input.len());
         Ok((&input[..p], &input[(p + 1).min(input.len())..]))
@@ -68,11 +66,13 @@ pub fn constant<'a, 'b: 'a>(
 ) -> impl Fn(&'a str) -> Result<'a, ()> {
     move |input| {
         if input.len() < text.len() {
-            return err!("constant: Out of input");
+            // Out of input.
+            return Err(input);
         }
         for (c1, c2) in text.chars().zip(input.chars()) {
             if c1 != c2 {
-                return err!("constant: Input does not match");
+                // Input does not match.
+                return Err(input);
             }
         }
         Ok(((), &input[text.len()..]))
@@ -81,13 +81,15 @@ pub fn constant<'a, 'b: 'a>(
 
 pub fn indentation(input: &str) -> Result<&str> {
     if input == "" {
-        return err!("indentation: End of input");
+        // End of input.
+        return Err(input);
     }
 
     for (i, c) in input.char_indices() {
         if c == '\n' || !c.is_whitespace() {
             if i == 0 {
-                return err!("indentation: No indentation");
+                // No indentation.
+                return Err(input);
             } else {
                 return Ok((&input[0..i], &input[i..]));
             }
@@ -95,7 +97,7 @@ pub fn indentation(input: &str) -> Result<&str> {
     }
 
     // If we fell through with nonempty input, the whole rest of input is
-    // indetation.
+    // indentation.
     Ok((input, ""))
 }
 
@@ -103,9 +105,11 @@ pub fn indentation(input: &str) -> Result<&str> {
 ///
 /// They must share a maximum prefix of complete segments with the previous
 /// indentation given as parameter.
-pub fn indentations<'a, 'b: 'a>(
+pub fn indentations<'a, 'b>(
     previous: &'b Vec<&'a str>,
-) -> impl Fn(&'a str) -> Result<'a, Vec<&'a str>> {
+) -> impl Fn(&'a str) -> Result<'a, Vec<&'a str>> + 'b {
+    // XXX: previous should be a reference but couldn't get borrow checker to
+    // work with that.
     move |input| {
         let mut pos = input;
         let mut ret: Vec<&'a str> = Vec::new();
@@ -114,7 +118,7 @@ pub fn indentations<'a, 'b: 'a>(
             // While we have the exact same indetation as before, just push the
             // segments in.
             if read(&mut pos, constant(segment)).is_ok() {
-                ret.push(*segment);
+                ret.push(segment);
                 continue;
             }
 
@@ -125,7 +129,7 @@ pub fn indentations<'a, 'b: 'a>(
                     // There are still segments left, input has indentation, but
                     // the indentation in input does not match the latest segment.
                     // This is not allowed.
-                    return err!("indentations: Mismatched indentation");
+                    return Err(pos);
                 }
                 Err(_) => {
                     // If indentation parse fails right away, this means we're out
@@ -154,7 +158,8 @@ pub fn empty_comment(input: &str) -> Result<()> {
     if line.starts_with("--") && line[2..].chars().all(|c| c.is_whitespace()) {
         Ok(((), rest))
     } else {
-        err!("empty_comment: Not an empty comment")
+        // Not an empty comment
+        Err(input)
     }
 }
 
@@ -170,7 +175,8 @@ pub fn comment(input: &str) -> Result<&str> {
     {
         Ok((line, rest))
     } else {
-        err!("comment: Not a comment")
+        // Not a comment
+        Err(input)
     }
 }
 
@@ -180,7 +186,8 @@ pub fn blank_line(input: &str) -> Result<()> {
     if line.chars().all(|c| c.is_whitespace()) {
         Ok(((), rest))
     } else {
-        err!("blank_line: Line has content")
+        // Not a blank line
+        Err(input)
     }
 }
 
@@ -193,20 +200,42 @@ pub fn blank_line(input: &str) -> Result<()> {
 /// common new indentation prefix. All body lines must have consistent
 /// indentation with this prefix, but their indentation beyond the prefix is
 /// ignored. The resulting string will have the prefix indentations stripped.
+///
+/// As a special case, if `previous` indentation is empty, the entire input is
+/// assumed to belong to the body and will just be returned as is.
 pub fn indented_body<'a>(
     previous: &'a Vec<&'a str>,
     input: &'a str,
 ) -> Result<'a, String> {
+    // Special case if there's no expected initial indentation, return input
+    // as is.
+    //
+    // XXX: To keep things less surprising, this could be modified to check if
+    // all of the input lines still have a shared indent prefix and stripping
+    // that prefix if there is (and erroring out if the global indentation is
+    // inconsistent with tabs and spaces). Otherwise there's an unspoken
+    // assumption that `indented_body` never returns values with a global
+    // indentation, which is violated by the zero starting indent case.
+    if previous.is_empty() {
+        return Ok((input.trim_end().into(), ""));
+    }
+
     // Find the minimum indent.
     let (mut indent, _): (Vec<&'a str>, _) = indentations(previous)(input)?;
     if indent.len() == previous.len() {
-        return err!("indented_body: No indented lines found");
+        // No indented lines found
+        return Err(input);
     }
     let mut pos = input;
     loop {
         if pos == "" {
             break;
         }
+
+        if read(&mut pos, blank_line).is_ok() {
+            continue;
+        }
+
         // We might catch inconsistent indentation with the existing indents
         // here.
         let candidate = read(&mut pos, indentations(previous))?;
@@ -221,6 +250,10 @@ pub fn indented_body<'a>(
                 indent = candidate;
             }
         }
+
+        if read(&mut pos, line).is_err() {
+            break;
+        }
     }
 
     // Read the lines with our indent
@@ -233,7 +266,8 @@ pub fn indented_body<'a>(
         if read(&mut pos, blank_line).is_ok() {
             ret.push('\n');
         } else {
-            let line_indent = read(&mut pos, indentations(&indent))?;
+            let mut next_pos = pos;
+            let line_indent = read(&mut next_pos, indentations(&indent))?;
 
             if line_indent.len() < indent.len() {
                 break;
@@ -241,17 +275,16 @@ pub fn indented_body<'a>(
             if line_indent.len() > indent.len() {
                 ret.push_str(line_indent[line_indent.len() - 1]);
             }
-            ret.push_str(read(&mut pos, line)?);
+            ret.push_str(read(&mut next_pos, line)?);
             ret.push('\n');
+            pos = next_pos;
         }
     }
     debug_assert!(!ret.is_empty());
     // Get rid of trailing newline.
     ret.pop();
 
-    // XXX: Stupid hackery instead of just returning (ret, pos) because borrow
-    // checker thinks pos has been somehow tainted at this point.
-    Ok((ret, &input[(input.len() - pos.len())..]))
+    Ok((ret, pos))
 }
 
 /// Parse an IDM attribute key.
@@ -263,7 +296,8 @@ pub fn key(input: &str) -> Result<String> {
     let word = read(&mut pos, word)?;
 
     if !word.ends_with(":") || word == ":" {
-        return err!("key: Invalid syntax");
+        // Invalid syntax
+        return Err(input);
     }
 
     let word = &word[..(word.len() - 1)]; //  Drop the trailing ':'.
@@ -345,5 +379,51 @@ mod tests {
 
         assert_eq!(key("foo: bar"), Ok(("foo".into(), "bar")));
         assert_eq!(key("foo-bar: baz"), Ok(("foo_bar".into(), "baz")));
+    }
+
+    #[test]
+    fn test_indented_body() {
+        assert_eq!(indented_body(&vec![], ""), Ok(("".into(), "")));
+        assert_eq!(indented_body(&vec![], "a"), Ok(("a".into(), "")));
+        assert_eq!(indented_body(&vec![], "a\nb"), Ok(("a\nb".into(), "")));
+        assert_eq!(indented_body(&vec![], "  a\nb"), Ok(("  a\nb".into(), "")));
+        assert_eq!(indented_body(&vec![], "a\nb\n"), Ok(("a\nb".into(), "")));
+
+        assert_eq!(indented_body(&vec![" "], "  a\n b"), Ok(("a".into(), " b")));
+        assert_eq!(indented_body(&vec![" "], "  a\n  b\n c"), Ok(("a\nb".into(), " c")));
+        assert_eq!(indented_body(&vec![" "], "  a\n   \t \n  b\n c"), Ok(("a\n\nb".into(), " c")));
+        assert_eq!(indented_body(&vec![" "], "  a\n \tb\n c"), Err("\tb\n c"));
+        assert_eq!(indented_body(&vec![" "], " a"), Err(" a"));
+
+        assert_eq!(indented_body(&vec![" ", " "], "  \ta\nb"), Ok(("a".into(), "b")));
+
+        // Indented block's indent level not revealed at the first line
+        assert_eq!(indented_body(&vec![" "], "   ##
+  ####
+  ####
+   ##"), Ok((" ##
+####
+####
+ ##".into(), "")));
+
+        // Allow inconsistent indentation within body.
+        assert_eq!(indented_body(&vec![" "], "  \t##
+  ####
+  ####
+   ##"), Ok(("\t##
+####
+####
+ ##".into(), "")));
+
+        // Mix things up with a blank line.
+        assert_eq!(indented_body(&vec![" "], "   ##
+
+  ####
+  ####
+   ##"), Ok((" ##
+
+####
+####
+ ##".into(), "")));
     }
 }
