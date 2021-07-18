@@ -45,12 +45,13 @@ impl<'a> Cursor<'a> {
             debug_assert_eq!(
                 &self.input[self.input.len() - remaining_input.len()..],
                 remaining_input,
-                "Malformed remaining input slice from parser"
+                "Cursor::err: Malformed remaining input slice"
             );
 
             // Find out how much ahead of the current line number the error
-            // site is.
-            let line_number = self.line_number
+            // site is. (Force line number to be at least 1 to account for the
+            // "before start of input" special state.)
+            let line_number = self.line_number.max(1)
                 + self.input[..self.input.len() - remaining_input.len()]
                     .chars()
                     .filter(|&c| c == '\n')
@@ -58,6 +59,34 @@ impl<'a> Cursor<'a> {
 
             Error(format!("Line {}: {}", line_number, msg))
         }
+    }
+
+    /// Consume input until it matches 'remaining_input'.
+    ///
+    /// This updates line numbers, you should not use other methods to update
+    /// self.input.
+    fn consume_to(&mut self, remaining_input: &str) {
+        let consumed_len = self.input.len() - remaining_input.len();
+
+        if consumed_len == 0 {
+            return;
+        }
+
+        debug_assert_eq!(
+            &self.input[consumed_len..],
+            remaining_input,
+            "Cursor::consume_to: Malformed remaining input slice"
+        );
+
+        // Exit the "outside of the file" special state the moment any input
+        // is seen.
+        if self.line_number == 0 {
+            self.line_number = 1;
+        }
+
+        self.line_number += self.input[..consumed_len].chars().filter(|&c| c == '\n').count();
+
+        self.input = &self.input[consumed_len..];
     }
 }
 
