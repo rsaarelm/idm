@@ -84,7 +84,10 @@ impl<'a> Cursor<'a> {
             self.line_number = 1;
         }
 
-        self.line_number += self.input[..consumed_len].chars().filter(|&c| c == '\n').count();
+        self.line_number += self.input[..consumed_len]
+            .chars()
+            .filter(|&c| c == '\n')
+            .count();
 
         self.input = &self.input[consumed_len..];
     }

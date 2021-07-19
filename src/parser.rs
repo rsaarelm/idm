@@ -61,9 +61,7 @@ pub fn line(input: &str) -> Result<&str> {
 /// Matches given constant with input.
 ///
 /// Fails if input does not match, consumes constant otherwise.
-fn constant<'a, 'b: 'a>(
-    text: &'b str,
-) -> impl Fn(&'a str) -> Result<'a, ()> {
+fn constant<'a, 'b: 'a>(text: &'b str) -> impl Fn(&'a str) -> Result<'a, ()> {
     move |input| {
         if input.len() < text.len() {
             // Out of input.
@@ -376,7 +374,10 @@ mod tests {
         assert!(indentations(&vec!["  ", "\t"])(" ").is_err());
         assert!(indentations(&vec!["  ", "\t"])(" a").is_err());
         assert!(indentations(&vec!["  ", "\t"])("  ").is_err()); // Blank line
-        assert_eq!(indentations(&vec!["  ", "\t"])("  a"), Ok((vec!["  "], "a")));
+        assert_eq!(
+            indentations(&vec!["  ", "\t"])("  a"),
+            Ok((vec!["  "], "a"))
+        );
         assert_eq!(
             indentations(&vec!["  ", "\t"])("  abc"),
             Ok((vec!["  "], "abc"))
@@ -434,42 +435,84 @@ mod tests {
         assert_eq!(indented_body(&vec![], "  a\nb"), Ok(("  a\nb".into(), "")));
         assert_eq!(indented_body(&vec![], "a\nb\n"), Ok(("a\nb".into(), "")));
 
-        assert_eq!(indented_body(&vec![" "], "  a\n b"), Ok(("a".into(), " b")));
-        assert_eq!(indented_body(&vec![" "], "  a\n  b\n c"), Ok(("a\nb".into(), " c")));
-        assert_eq!(indented_body(&vec![" "], "  a\n   \t \n  b\n c"), Ok(("a\n\nb".into(), " c")));
+        assert_eq!(
+            indented_body(&vec![" "], "  a\n b"),
+            Ok(("a".into(), " b"))
+        );
+        assert_eq!(
+            indented_body(&vec![" "], "  a\n  b\n c"),
+            Ok(("a\nb".into(), " c"))
+        );
+        assert_eq!(
+            indented_body(&vec![" "], "  a\n   \t \n  b\n c"),
+            Ok(("a\n\nb".into(), " c"))
+        );
         assert_eq!(indented_body(&vec![" "], "  a\n \tb\n c"), Err("\tb\n c"));
         assert_eq!(indented_body(&vec![" "], " a"), Err(" a"));
 
-        assert_eq!(indented_body(&vec![" ", " "], "  \ta\nb"), Ok(("a".into(), "b")));
+        assert_eq!(
+            indented_body(&vec![" ", " "], "  \ta\nb"),
+            Ok(("a".into(), "b"))
+        );
 
         // Indented block's indent level not revealed at the first line
-        assert_eq!(indented_body(&vec![" "], "   ##
+        assert_eq!(
+            indented_body(
+                &vec![" "],
+                "   ##
   ####
   ####
-   ##"), Ok((" ##
+   ##"
+            ),
+            Ok((
+                " ##
 ####
 ####
- ##".into(), "")));
+ ##"
+                .into(),
+                ""
+            ))
+        );
 
         // Allow inconsistent indentation within body.
-        assert_eq!(indented_body(&vec![" "], "  \t##
+        assert_eq!(
+            indented_body(
+                &vec![" "],
+                "  \t##
   ####
   ####
-   ##"), Ok(("\t##
+   ##"
+            ),
+            Ok((
+                "\t##
 ####
 ####
- ##".into(), "")));
+ ##"
+                .into(),
+                ""
+            ))
+        );
 
         // Mix things up with a blank line.
-        assert_eq!(indented_body(&vec![" "], "   ##
+        assert_eq!(
+            indented_body(
+                &vec![" "],
+                "   ##
 
   ####
   ####
-   ##"), Ok((" ##
+   ##"
+            ),
+            Ok((
+                " ##
 
 ####
 ####
- ##".into(), "")));
+ ##"
+                .into(),
+                ""
+            ))
+        );
     }
 
     #[test]
@@ -479,22 +522,42 @@ mod tests {
         assert_eq!(headline(&vec![])("\n"), Err("\n"));
         assert_eq!(headline(&vec![])("a\n"), Err("a\n"));
 
-        assert_eq!(headline(&vec![])("\
+        assert_eq!(
+            headline(&vec![])(
+                "\
 a
-b"), Err("a\nb"));
+b"
+            ),
+            Err("a\nb")
+        );
 
-        assert_eq!(headline(&vec![])("\
-a
-
-b"), Err("a\n\nb"));
-
-        assert_eq!(headline(&vec![])("\
-a
-  b"), Ok((("a", vec!["  "]), "  b")));
-
-        assert_eq!(headline(&vec![])("\
+        assert_eq!(
+            headline(&vec![])(
+                "\
 a
 
-  b"), Ok((("a", vec!["  "]), "\n  b")));
+b"
+            ),
+            Err("a\n\nb")
+        );
+
+        assert_eq!(
+            headline(&vec![])(
+                "\
+a
+  b"
+            ),
+            Ok((("a", vec!["  "]), "  b"))
+        );
+
+        assert_eq!(
+            headline(&vec![])(
+                "\
+a
+
+  b"
+            ),
+            Ok((("a", vec!["  "]), "\n  b"))
+        );
     }
 }
