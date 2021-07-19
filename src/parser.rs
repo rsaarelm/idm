@@ -1,6 +1,8 @@
 //! Stateless parsing primitives
 
-type Result<'a, T> = std::result::Result<(T, &'a str), &'a str>;
+use crate::indent_string::IndentString;
+
+pub type Result<'a, T> = std::result::Result<(T, &'a str), &'a str>;
 
 /// Read item from mutable slice, update slice if read was successful.
 pub fn read<'a, T>(
@@ -58,103 +60,6 @@ pub fn line(input: &str) -> Result<&str> {
     }
 }
 
-/// Matches given constant with input.
-///
-/// Fails if input does not match, consumes constant otherwise.
-fn constant<'a, 'b: 'a>(text: &'b str) -> impl Fn(&'a str) -> Result<'a, ()> {
-    move |input| {
-        if input.len() < text.len() {
-            // Out of input.
-            return Err(input);
-        }
-        for (c1, c2) in text.chars().zip(input.chars()) {
-            if c1 != c2 {
-                // Input does not match.
-                return Err(input);
-            }
-        }
-        Ok(((), &input[text.len()..]))
-    }
-}
-
-fn indent_segment(input: &str) -> Result<&str> {
-    if input == "" {
-        // End of input.
-        return Err(input);
-    }
-
-    for (i, c) in input.char_indices() {
-        if c == '\n' || !c.is_whitespace() {
-            if i == 0 {
-                // No indentation.
-                return Err(input);
-            } else {
-                return Ok((&input[0..i], &input[i..]));
-            }
-        }
-    }
-
-    // If we fell through with nonempty input, the whole rest of input is
-    // indentation.
-    Ok((input, ""))
-}
-
-/// Parse indentations from beginning of the line.
-///
-/// They must share a maximum prefix of complete segments with the previous
-/// indentation given as parameter.
-pub fn indentations<'a, 'b>(
-    previous: &'b Vec<&'a str>,
-) -> impl Fn(&'a str) -> Result<'a, Vec<&'a str>> + 'b {
-    // XXX: previous should be a reference but couldn't get borrow checker to
-    // work with that.
-    move |input| {
-        let mut pos = input;
-        let mut ret: Vec<&'a str> = Vec::new();
-
-        // Indentation is not defined on a blank line.
-        if blank_line(input).is_ok() {
-            return Err(input);
-        }
-
-        for segment in previous {
-            // While we have the exact same indetation as before, just push the
-            // segments in.
-            if read(&mut pos, constant(segment)).is_ok() {
-                ret.push(segment);
-                continue;
-            }
-
-            // Fallthrough, failed to match constant.
-
-            match indent_segment(pos) {
-                Ok(_) => {
-                    // There are still segments left, input has indentation, but
-                    // the indentation in input does not match the latest segment.
-                    // This is not allowed.
-                    return Err(pos);
-                }
-                Err(_) => {
-                    // If indentation parse fails right away, this means we're out
-                    // of indentation, either hit the content or at EOL. We're
-                    // done here.
-                    return Ok((ret, pos));
-                }
-            }
-        }
-
-        // Fell through, check if there's extra indentation.
-        if let Ok((new_segment, rest)) = indent_segment(pos) {
-            // Everything after the expected sequence becomes a new chunk.
-            ret.push(new_segment);
-            return Ok((ret, rest));
-        }
-
-        // Final case, perfect line-up with previous indetation.
-        Ok((ret, pos))
-    }
-}
-
 pub fn empty_comment(input: &str) -> Result<()> {
     let (line, rest) = line(input)?;
 
@@ -199,9 +104,9 @@ pub fn blank_line(input: &str) -> Result<()> {
 /// On success, return the headline and the new indent string for the first
 /// non-empty child line. Leave cursor at the start of the line after the
 /// headline.
-pub fn headline<'a, 'b>(
-    current_indent: &'b Vec<&'a str>,
-) -> impl Fn(&'a str) -> Result<'a, (&'a str, Vec<&'a str>)> + 'b {
+pub fn headline<'a: 'b, 'b>(
+    current_indent: &'b IndentString,
+) -> impl Fn(&'a str) -> Result<'a, (&'a str, IndentString)> + 'b {
     move |input| {
         let (ret, rest) = line(input)?;
         let mut pos = rest;
@@ -217,7 +122,7 @@ pub fn headline<'a, 'b>(
                 continue;
             }
 
-            let indent = indentations(current_indent)(pos)?.0;
+            let indent = current_indent.match_next(pos)?.0;
             return if indent.len() > current_indent.len() {
                 Ok(((ret, indent), rest))
             } else {
@@ -240,7 +145,7 @@ pub fn headline<'a, 'b>(
 /// As a special case, if `previous` indentation is empty, the entire input is
 /// assumed to belong to the body and will just be returned as is.
 pub fn indented_body<'a>(
-    previous: &'a Vec<&'a str>,
+    prev: &'a IndentString,
     input: &'a str,
 ) -> Result<'a, String> {
     // Special case if there's no expected initial indentation, return input
@@ -252,13 +157,13 @@ pub fn indented_body<'a>(
     // inconsistent with tabs and spaces). Otherwise there's an unspoken
     // assumption that `indented_body` never returns values with a global
     // indentation, which is violated by the zero starting indent case.
-    if previous.is_empty() {
+    if prev.is_empty() {
         return Ok((input.trim_end().into(), ""));
     }
 
     // Find the minimum indent.
-    let (mut indent, _): (Vec<&'a str>, _) = indentations(previous)(input)?;
-    if indent.len() == previous.len() {
+    let (mut indent, _) = prev.match_next(input)?;
+    if indent.len() == prev.len() {
         // No indented lines found
         return Err(input);
     }
@@ -274,15 +179,13 @@ pub fn indented_body<'a>(
 
         // We might catch inconsistent indentation with the existing indents
         // here.
-        let candidate = read(&mut pos, indentations(previous))?;
-        if candidate.len() <= previous.len() {
+        let candidate = read(&mut pos, |input| prev.match_next(input))?;
+        if candidate.len() <= prev.len() {
             break;
         } else {
             // Shortest additional indent -> the one we want.
-            debug_assert!(candidate.len() == previous.len() + 1);
-            if candidate[candidate.len() - 1].len()
-                < indent[indent.len() - 1].len()
-            {
+            debug_assert!(candidate.len() == prev.len() + 1);
+            if candidate[candidate.len() - 1] < indent[indent.len() - 1] {
                 indent = candidate;
             }
         }
@@ -303,13 +206,16 @@ pub fn indented_body<'a>(
             ret.push('\n');
         } else {
             let mut next_pos = pos;
-            let line_indent = read(&mut next_pos, indentations(&indent))?;
+            let line_indent =
+                read(&mut next_pos, |input| indent.match_next(input))?;
 
             if line_indent.len() < indent.len() {
                 break;
             }
             if line_indent.len() > indent.len() {
-                ret.push_str(line_indent[line_indent.len() - 1]);
+                ret.push_str(
+                    &line_indent.string(line_indent[line_indent.len() - 1]),
+                );
             }
             ret.push_str(read(&mut next_pos, line)?);
             ret.push('\n');
@@ -345,6 +251,7 @@ pub fn key(input: &str) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::indent_string::IndentString;
 
     #[test]
     fn test_words() {
@@ -357,45 +264,6 @@ mod tests {
         assert_eq!(read(&mut cursor, word), Ok("brown"));
         assert_eq!(read(&mut cursor, word), Ok("fox"));
         assert!(read(&mut cursor, word).is_err(), "Must stop at EOL");
-    }
-
-    #[test]
-    fn test_indentation() {
-        // NB. Test inputs are for educational purpose only. Please don't mix
-        // tabs and spaces in any actual IDM file's indentation.
-
-        assert!(indent_segment("a").is_err());
-        assert_eq!(indent_segment(" a"), Ok((" ", "a")));
-        assert_eq!(indent_segment("\ta"), Ok(("\t", "a")));
-        assert_eq!(indent_segment("  "), Ok(("  ", "")));
-
-        assert_eq!(indentations(&vec!["  ", "\t"])(""), Ok((vec![], "")));
-        assert_eq!(indentations(&vec!["  ", "\t"])("abc"), Ok((vec![], "abc")));
-        assert!(indentations(&vec!["  ", "\t"])(" ").is_err());
-        assert!(indentations(&vec!["  ", "\t"])(" a").is_err());
-        assert!(indentations(&vec!["  ", "\t"])("  ").is_err()); // Blank line
-        assert_eq!(
-            indentations(&vec!["  ", "\t"])("  a"),
-            Ok((vec!["  "], "a"))
-        );
-        assert_eq!(
-            indentations(&vec!["  ", "\t"])("  abc"),
-            Ok((vec!["  "], "abc"))
-        );
-
-        assert!(indentations(&vec!["  ", "\t"])("\t").is_err());
-        assert_eq!(
-            indentations(&vec!["  ", "\t"])("  \ta"),
-            Ok((vec!["  ", "\t"], "a"))
-        );
-        assert_eq!(
-            indentations(&vec!["  ", "\t"])("  \t\t  a"),
-            Ok((vec!["  ", "\t", "\t  "], "a"))
-        );
-        assert_eq!(
-            indentations(&vec!["  ", "\t"])("  \t\t  abc"),
-            Ok((vec!["  ", "\t", "\t  "], "abc"))
-        );
     }
 
     #[test]
@@ -429,36 +297,33 @@ mod tests {
 
     #[test]
     fn test_indented_body() {
-        assert_eq!(indented_body(&vec![], ""), Ok(("".into(), "")));
-        assert_eq!(indented_body(&vec![], "a"), Ok(("a".into(), "")));
-        assert_eq!(indented_body(&vec![], "a\nb"), Ok(("a\nb".into(), "")));
-        assert_eq!(indented_body(&vec![], "  a\nb"), Ok(("  a\nb".into(), "")));
-        assert_eq!(indented_body(&vec![], "a\nb\n"), Ok(("a\nb".into(), "")));
+        let empty = IndentString::default();
+        let space_1 = IndentString::Spaces(vec![1]);
+        let space_2 = IndentString::Spaces(vec![1, 1]);
+        assert_eq!(indented_body(&empty, ""), Ok(("".into(), "")));
+        assert_eq!(indented_body(&empty, "a"), Ok(("a".into(), "")));
+        assert_eq!(indented_body(&empty, "a\nb"), Ok(("a\nb".into(), "")));
+        assert_eq!(indented_body(&empty, "  a\nb"), Ok(("  a\nb".into(), "")));
+        assert_eq!(indented_body(&empty, "a\nb\n"), Ok(("a\nb".into(), "")));
 
+        assert_eq!(indented_body(&space_1, "  a\n b"), Ok(("a".into(), " b")));
         assert_eq!(
-            indented_body(&vec![" "], "  a\n b"),
-            Ok(("a".into(), " b"))
-        );
-        assert_eq!(
-            indented_body(&vec![" "], "  a\n  b\n c"),
+            indented_body(&space_1, "  a\n  b\n c"),
             Ok(("a\nb".into(), " c"))
         );
         assert_eq!(
-            indented_body(&vec![" "], "  a\n   \t \n  b\n c"),
+            indented_body(&space_1, "  a\n   \t \n  b\n c"),
             Ok(("a\n\nb".into(), " c"))
         );
-        assert_eq!(indented_body(&vec![" "], "  a\n \tb\n c"), Err("\tb\n c"));
-        assert_eq!(indented_body(&vec![" "], " a"), Err(" a"));
+        assert_eq!(indented_body(&space_1, "  a\n \tb\n c"), Err("\tb\n c"));
+        assert_eq!(indented_body(&space_1, " a"), Err(" a"));
 
-        assert_eq!(
-            indented_body(&vec![" ", " "], "  \ta\nb"),
-            Ok(("a".into(), "b"))
-        );
+        assert_eq!(indented_body(&space_2, "    a\nb"), Ok(("a".into(), "b")));
 
         // Indented block's indent level not revealed at the first line
         assert_eq!(
             indented_body(
-                &vec![" "],
+                &space_1,
                 "   ##
   ####
   ####
@@ -474,29 +339,34 @@ mod tests {
             ))
         );
 
-        // Allow inconsistent indentation within body.
-        assert_eq!(
-            indented_body(
-                &vec![" "],
-                "  \t##
-  ####
-  ####
-   ##"
-            ),
-            Ok((
-                "\t##
-####
-####
- ##"
-                .into(),
-                ""
-            ))
-        );
+        // On second thought, let's not bother allowing this. You gotta stick
+        // with one indentation, even inside the block, even though it's
+        // possible to write the parser to allow this.
+        /*
+                // Allow inconsistent indentation within body.
+                assert_eq!(
+                    indented_body(
+                        &space_1,
+                        "  \t##
+          ####
+          ####
+           ##"
+                    ),
+                    Ok((
+                        "\t##
+        ####
+        ####
+         ##"
+                        .into(),
+                        ""
+                    ))
+                );
+                */
 
         // Mix things up with a blank line.
         assert_eq!(
             indented_body(
-                &vec![" "],
+                &space_1,
                 "   ##
 
   ####
@@ -517,13 +387,15 @@ mod tests {
 
     #[test]
     fn test_headline() {
-        assert_eq!(headline(&vec![])(""), Err(""));
-        assert_eq!(headline(&vec![])("a"), Err("a"));
-        assert_eq!(headline(&vec![])("\n"), Err("\n"));
-        assert_eq!(headline(&vec![])("a\n"), Err("a\n"));
+        let empty = IndentString::default();
+
+        assert_eq!(headline(&empty)(""), Err(""));
+        assert_eq!(headline(&empty)("a"), Err("a"));
+        assert_eq!(headline(&empty)("\n"), Err("\n"));
+        assert_eq!(headline(&empty)("a\n"), Err("a\n"));
 
         assert_eq!(
-            headline(&vec![])(
+            headline(&empty)(
                 "\
 a
 b"
@@ -532,7 +404,7 @@ b"
         );
 
         assert_eq!(
-            headline(&vec![])(
+            headline(&empty)(
                 "\
 a
 
@@ -542,22 +414,22 @@ b"
         );
 
         assert_eq!(
-            headline(&vec![])(
+            headline(&empty)(
                 "\
 a
   b"
             ),
-            Ok((("a", vec!["  "]), "  b"))
+            Ok((("a", IndentString::new(1)), "  b"))
         );
 
         assert_eq!(
-            headline(&vec![])(
+            headline(&empty)(
                 "\
 a
 
   b"
             ),
-            Ok((("a", vec!["  "]), "\n  b"))
+            Ok((("a", IndentString::new(1)), "\n  b"))
         );
     }
 }

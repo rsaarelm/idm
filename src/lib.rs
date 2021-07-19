@@ -6,6 +6,8 @@ pub use de::{from_str, Deserializer};
 mod error;
 pub use error::{Error, Result};
 
+mod indent_string;
+
 mod outline;
 
 mod parser;
