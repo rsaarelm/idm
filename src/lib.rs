@@ -10,7 +10,7 @@ mod indent_string;
 
 mod outline;
 
-mod parser;
+mod parse;
 
 mod ser;
 pub use ser::to_string;

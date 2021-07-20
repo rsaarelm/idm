@@ -5,7 +5,7 @@ use crate::indent_string::IndentString;
 pub type Result<'a, T> = std::result::Result<(T, &'a str), &'a str>;
 
 /// Read item from mutable slice, update slice if read was successful.
-pub fn read<'a, T>(
+pub fn r<'a, T>(
     s: &mut &'a str,
     item: impl Fn(&'a str) -> Result<T>,
 ) -> std::result::Result<T, &'a str> {
@@ -173,13 +173,13 @@ pub fn indented_body<'a>(
             break;
         }
 
-        if read(&mut pos, blank_line).is_ok() {
+        if r(&mut pos, blank_line).is_ok() {
             continue;
         }
 
         // We might catch inconsistent indentation with the existing indents
         // here.
-        let candidate = read(&mut pos, |input| prev.match_next(input))?;
+        let candidate = r(&mut pos, |input| prev.match_next(input))?;
         if candidate.len() <= prev.len() {
             break;
         } else {
@@ -190,7 +190,7 @@ pub fn indented_body<'a>(
             }
         }
 
-        if read(&mut pos, line).is_err() {
+        if r(&mut pos, line).is_err() {
             break;
         }
     }
@@ -202,12 +202,12 @@ pub fn indented_body<'a>(
         if pos == "" {
             break;
         }
-        if read(&mut pos, blank_line).is_ok() {
+        if r(&mut pos, blank_line).is_ok() {
             ret.push('\n');
         } else {
             let mut next_pos = pos;
             let line_indent =
-                read(&mut next_pos, |input| indent.match_next(input))?;
+                r(&mut next_pos, |input| indent.match_next(input))?;
 
             if line_indent.len() < indent.len() {
                 break;
@@ -217,7 +217,7 @@ pub fn indented_body<'a>(
                     &line_indent.string(line_indent[line_indent.len() - 1]),
                 );
             }
-            ret.push_str(read(&mut next_pos, line)?);
+            ret.push_str(r(&mut next_pos, line)?);
             ret.push('\n');
             pos = next_pos;
         }
@@ -235,7 +235,7 @@ pub fn indented_body<'a>(
 /// converted from IDM's kebab-case to Rust's camel_case.
 pub fn key(input: &str) -> Result<String> {
     let mut pos = input;
-    let word = read(&mut pos, word)?;
+    let word = r(&mut pos, word)?;
 
     if !word.ends_with(":") || word == ":" {
         // Invalid syntax
@@ -259,11 +259,11 @@ mod tests {
 
         let text = "The quick brown fox\njumps over";
         let mut cursor = &text[..];
-        assert_eq!(read(&mut cursor, word), Ok("The"));
-        assert_eq!(read(&mut cursor, word), Ok("quick"));
-        assert_eq!(read(&mut cursor, word), Ok("brown"));
-        assert_eq!(read(&mut cursor, word), Ok("fox"));
-        assert!(read(&mut cursor, word).is_err(), "Must stop at EOL");
+        assert_eq!(r(&mut cursor, word), Ok("The"));
+        assert_eq!(r(&mut cursor, word), Ok("quick"));
+        assert_eq!(r(&mut cursor, word), Ok("brown"));
+        assert_eq!(r(&mut cursor, word), Ok("fox"));
+        assert!(r(&mut cursor, word).is_err(), "Must stop at EOL");
     }
 
     #[test]

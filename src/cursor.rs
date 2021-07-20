@@ -1,4 +1,4 @@
-use crate::{err, error::Error, error::Result, parser};
+use crate::{err, error::Error, error::Result, parse};
 
 // TODO: New Result type to use with Cursor
 // pub type Result<'a, T> =
@@ -219,7 +219,7 @@ impl<'a> Cursor<'a> {
         );
         assert!(depth >= 0, "Can't construct line for depth -1");
 
-        if let Ok((line, rest)) = parser::line(self.line_start) {
+        if let Ok((line, rest)) = parse::line(self.line_start) {
             let result = if let Some(line_depth) = self.line_depth() {
                 if line_depth >= depth {
                     &line[(depth as usize)..]
@@ -324,7 +324,7 @@ impl<'a> Cursor<'a> {
         // found.
         let mut cursor = self.clone();
         cursor.skip_indentation();
-        let word = parser::read(&mut cursor.input, parser::word)
+        let word = parse::r(&mut cursor.input, parse::word)
             .map_err(self.err("Expected word"))?;
         *self = cursor;
         Ok(word)
@@ -337,7 +337,7 @@ impl<'a> Cursor<'a> {
     pub fn key(&mut self) -> Result<String> {
         let mut cursor = self.clone();
         cursor.skip_indentation();
-        let word = parser::read(&mut cursor.input, parser::key)
+        let word = parse::r(&mut cursor.input, parse::key)
             .map_err(self.err("Expected key"))?;
         *self = cursor;
         Ok(word)
@@ -351,7 +351,7 @@ impl<'a> Cursor<'a> {
         let mut cursor = self.clone();
         cursor.skip_indentation();
 
-        if let Ok((line, rest)) = parser::line(cursor.input) {
+        if let Ok((line, rest)) = parse::line(cursor.input) {
             *self = cursor;
             self.line_start = rest;
             self.input = rest;
@@ -365,7 +365,7 @@ impl<'a> Cursor<'a> {
     ///
     /// Line depth does not make sense for blank lines, so those get `None`.
     pub fn line_depth(&self) -> Option<i32> {
-        if let Ok((line, _)) = parser::line(self.line_start) {
+        if let Ok((line, _)) = parse::line(self.line_start) {
             if line.chars().all(|c| c.is_whitespace()) {
                 None
             } else {

@@ -1,4 +1,4 @@
-use crate::parser::{read, Result};
+use crate::parse::{self, Result};
 
 /// Representation for indentations
 ///
@@ -167,7 +167,7 @@ impl IndentString {
         for segment_len in self.iter() {
             // Each segment must be matched in full or indentation is
             // inconsistent.
-            read(&mut pos, |input| indent_fn(segment_len, input))?;
+            parse::r(&mut pos, |input| indent_fn(segment_len, input))?;
             ret.push(segment_len);
 
             if pos.chars().next().map_or(false, |c| !c.is_whitespace()) {
@@ -181,7 +181,7 @@ impl IndentString {
         // indent_fn should fail if it runs into either newline (indicating a
         // blank line) or a wrong indentation character.
         if pos.chars().next().map_or(false, |c| c.is_whitespace()) {
-            let new_indent = read(&mut pos, |input| indent_fn(0, input))?;
+            let new_indent = parse::r(&mut pos, |input| indent_fn(0, input))?;
             ret.push(new_indent.len());
         }
 
