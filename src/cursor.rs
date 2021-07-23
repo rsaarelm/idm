@@ -42,6 +42,10 @@ impl<'a> Cursor<'a> {
     /// Format error from parse into an actual error value.
     fn err<'b>(&'b self, msg: &'b str) -> impl Fn(&str) -> Error + 'b {
         move |remaining_input| {
+            // If this was tripped, it indicates a bug in the parser functions
+            // where a parser returned an error string that isn't a suffix of
+            // the input string. It should not happen no matter what kind of
+            // malformed input is fed to the parser.
             debug_assert_eq!(
                 &self.input[self.input.len() - remaining_input.len()..],
                 remaining_input,
