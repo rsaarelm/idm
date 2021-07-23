@@ -470,7 +470,7 @@ impl<'a, 'de> de::Deserializer<'de> for &'a mut Deserializer<'de> {
     {
         match self.mode {
             ParsingMode::Line(_) | ParsingMode::Word | ParsingMode::Key(_) => {
-                return err!("deserialize_struct: Can't nest in inline seq");
+                return err!("deserialize_map: Can't nest in inline seq");
             }
             _ => {}
         }
