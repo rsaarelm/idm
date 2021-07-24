@@ -365,7 +365,7 @@ impl<'a, 'de> de::SeqAccess<'de> for Sequence<'a, 'de> {
                 self.de.cursor.mode = ParsingMode::Block(true);
 
                 if self.de.cursor.at_empty_line() {
-                    // Enter body would consume an empty line as headline.
+                    // Start body would consume an empty line as headline.
                     // Make it the contents of the next step instead.
                     self.de.cursor.current_depth += 1;
                 } else if self
@@ -375,17 +375,17 @@ impl<'a, 'de> de::SeqAccess<'de> for Sequence<'a, 'de> {
                     .verbatim_line(self.de.cursor.current_depth)
                     == Ok(",")
                 {
-                    // Enter body would also consume the empty headline
+                    // Start body would also consume the empty headline
                     // marker, so another early exit condition here.
                     // XXX: This is another bit of ugly special cases...
                     self.de.cursor.current_depth += 1;
-                } else if let Err(_) = self.de.cursor.enter_body() {
+                } else if let Err(_) = self.de.cursor.start_body() {
                     // We were forced here because of being in a tuple, but
                     // there's no actual body left, the tuple element will be
                     // empty. Skip trying to enter the body and just increment
                     // the depth.
                     //
-                    // XXX: This relies in enter_body not performing mutations
+                    // XXX: This relies in start_body not performing mutations
                     // if it fails.
                     self.de.cursor.current_depth += 1;
                 }
@@ -399,10 +399,10 @@ impl<'a, 'de> de::SeqAccess<'de> for Sequence<'a, 'de> {
                 // next_element_seed again.
                 if self.idx == len {
                     if self.de.cursor.mode.is_inline() {
-                        self.de.cursor.exit_line()?;
+                        self.de.cursor.end_line()?;
                     } else {
                         if !self.is_merged {
-                            self.de.cursor.exit_body()?;
+                            self.de.cursor.end_body()?;
                         }
                     }
                     self.de.cursor.mode = ParsingMode::Block(true);
@@ -414,10 +414,10 @@ impl<'a, 'de> de::SeqAccess<'de> for Sequence<'a, 'de> {
         } else {
             // Exit when not finding more elements.
             if self.de.cursor.mode.is_inline() {
-                self.de.cursor.exit_line()?;
+                self.de.cursor.end_line()?;
             } else {
                 if !self.is_merged {
-                    self.de.cursor.exit_body()?;
+                    self.de.cursor.end_body()?;
                 }
             }
             self.de.cursor.mode = ParsingMode::Block(true);
@@ -512,7 +512,7 @@ impl<'a, 'de> de::MapAccess<'de> for Sequence<'a, 'de> {
         };
         let ret = seed.deserialize(&mut *self.de);
         if need_exit {
-            self.de.cursor.exit_body()?;
+            self.de.cursor.end_body()?;
         }
         ret
     }

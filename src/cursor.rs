@@ -131,7 +131,7 @@ impl<'a> Cursor<'a> {
             self.mode = ParsingMode::Word;
         } else {
             self.mode = ParsingMode::Block(true);
-            self.enter_body()?;
+            self.start_body()?;
         }
         Ok(())
     }
@@ -150,7 +150,7 @@ impl<'a> Cursor<'a> {
             self.mode = ParsingMode::Word;
         } else if !is_inline && is_outline {
             self.mode = ParsingMode::Block(true);
-            self.enter_body()?;
+            self.start_body()?;
         } else {
             self.mode = ParsingMode::Line(false);
         }
@@ -162,7 +162,7 @@ impl<'a> Cursor<'a> {
             return err!("Nested sequence found in inline sequence");
         }
 
-        self.enter_body()
+        self.start_body()
     }
 
     pub fn start_struct(&mut self, _fields: &'static [&'static str]) -> Result<()> {
@@ -170,7 +170,7 @@ impl<'a> Cursor<'a> {
             return err!("Nested sequence found in inline sequence");
         }
 
-        self.enter_body()
+        self.start_body()
     }
 
     pub fn end(&mut self) -> Result<()> {
@@ -310,7 +310,7 @@ impl<'a> Cursor<'a> {
 // Shimmed from V01 deser
 impl<'a> Cursor<'a> {
     /// Move cursor to start of the current headline's body.
-    pub fn enter_body(&mut self) -> Result<()> {
+    pub fn start_body(&mut self) -> Result<()> {
         let depth = self.line_depth();
         if depth.map_or(false, |n| n > self.current_depth) {
             // Missing headline (but there is content, empty lines don't
@@ -323,18 +323,18 @@ impl<'a> Cursor<'a> {
             // Empty headlines are counted here, since we need to skip over
             // the line.
             if self.has_headline_content(self.current_depth) {
-                return err!("enter_body: Unparsed headline input");
+                return err!("start_body: Unparsed headline input");
             }
 
             let _ = self.headline(self.current_depth);
             self.current_depth += 1;
             Ok(())
         } else {
-            err!("enter_body: Out of depth")
+            err!("start_body: Out of depth")
         }
     }
 
-    pub fn exit_body(&mut self) -> Result<()> {
+    pub fn end_body(&mut self) -> Result<()> {
         if self.at_end() && self.current_depth > -1 {
             // Can exit until -1 at EOF.
             self.current_depth -= 1;
@@ -356,16 +356,16 @@ impl<'a> Cursor<'a> {
                 self.current_depth -= 1;
                 Ok(())
             } else {
-                err!("exit_body: Body not empty")
+                err!("end_body: Body not empty")
             }
         } else {
-            err!("exit_body: Body not empty")
+            err!("end_body: Body not empty")
         }
     }
 
-    pub fn exit_line(&mut self) -> Result<()> {
+    pub fn end_line(&mut self) -> Result<()> {
         if self.has_headline_content(self.current_depth) {
-            err!("exit_line: Unparsed content left in line")
+            err!("end_line: Unparsed content left in line")
         } else {
             let _ = self.line();
             Ok(())
@@ -637,7 +637,7 @@ impl<'a> Cursor<'a> {
             self.input = rest;
             Ok(line)
         } else {
-            err!("exit_line: End of input")
+            err!("end_line: End of input")
         }
     }
 
