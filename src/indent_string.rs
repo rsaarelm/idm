@@ -67,24 +67,6 @@ impl IndentString {
         }
     }
 
-    fn iter(&self) -> impl Iterator<Item = usize> + '_ {
-        // XXX: Would be nice to impl IntoIterator, but I don't think that can
-        // work as long as my iterator is defined in terms of from_fn...
-        let mut iter = match self {
-            Undetermined => None,
-            Spaces(v) => Some(v.iter()),
-            Tabs(v) => Some(v.iter()),
-        };
-
-        std::iter::from_fn(move || {
-            if let Some(ref mut iter) = iter {
-                iter.next().cloned()
-            } else {
-                None
-            }
-        })
-    }
-
     /// Construct a string of given depth using the character of this indent
     /// style.
     ///
@@ -164,7 +146,7 @@ impl IndentString {
         }
 
         let mut pos = input;
-        for segment_len in self.iter() {
+        for &segment_len in self.iter() {
             // Each segment must be matched in full or indentation is
             // inconsistent.
             parse::r(&mut pos, |input| indent_fn(segment_len, input))?;
