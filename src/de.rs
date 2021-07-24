@@ -77,12 +77,16 @@ pub struct Deserializer<'de> {
     seq_pos: Option<SequencePos>,
     // Hacky hack hack to support tuples with Option first field
     delayed_enter_body_requested: bool,
+    // Fallback position if we need to retry speculative parsing.
+    checkpoint: Cursor<'de>,
 }
 
 impl<'de> Deserializer<'de> {
     pub fn new(input: &'de str) -> Deserializer<'de> {
+        let cursor = Cursor::new(input);
         Deserializer {
-            cursor: Cursor::new(input),
+            checkpoint: cursor.clone(),
+            cursor,
             // Start at the head of a dummy section encompassing the whole
             // input. Since input's baseline indent is 0, our starting indent
             // for the dummy construct around it is -1.
@@ -91,6 +95,16 @@ impl<'de> Deserializer<'de> {
             seq_pos: None,
             delayed_enter_body_requested: false,
         }
+    }
+
+    /// Save current cursor position as checkpoint.
+    fn save(&mut self) {
+        self.checkpoint = self.cursor.clone();
+    }
+
+    /// Restore cursor position from checkpoint.
+    fn restore(&mut self) {
+        self.cursor = self.checkpoint.clone();
     }
 
     fn parse_next<T: FromStr>(&mut self) -> Result<T> {
