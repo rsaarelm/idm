@@ -1,8 +1,62 @@
 use crate::{err, error::Error, error::Result, parse};
+use std::borrow::Cow;
 
 // TODO: New Result type to use with Cursor
 // pub type Result<'a, T> =
 //     std::result::Result<(T, Cursor<'a>), crate::error::Error>;
+
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub enum ParsingMode {
+    /// The most common parsing mode, up to the next element with the same or
+    /// higher indent than the current point.
+    ///
+    /// Flag set to true means commas should be escaped
+    Block(bool),
+    /// Up to the end of the current line only, even if there are more
+    /// indented lines after this.
+    ///
+    /// Flag set to true means commas should be escaped
+    Line(bool),
+    /// Single whitespace-separated token. Do not move to next line.
+    Word,
+    /// Single whitespace-separated token, must have form "key-name:" (valid
+    /// identifier, ends in colon).
+    ///
+    /// The colon is removed and the symbol is changed from kebab-case to
+    /// camel_case when parsing.
+    ///
+    /// If the magic flag is set, emit '_contents' instead of parsing
+    /// anything.
+    Key(bool),
+}
+
+impl ParsingMode {
+    pub fn is_block(self) -> bool {
+        use ParsingMode::*;
+        match self {
+            Block(_) => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_inline(self) -> bool {
+        use ParsingMode::*;
+        match self {
+            Word | Key(_) => true,
+            _ => false,
+        }
+    }
+}
+
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub enum SequencePos {
+    /// Currently parsed sequence is at the first element of a tuple. Special
+    /// parsing rules may be in effect.
+    TupleStart,
+    /// Currently parsed sequence is at the last element of a tuple. Special
+    /// parsing rules may be in effect.
+    TupleEnd,
+}
 
 /// Low-level text processing for deserializer.
 #[derive(Clone)]
@@ -21,6 +75,9 @@ pub struct Cursor<'a> {
     expected_indent: Vec<&'a str>,
     /// Line number of current input line.
     line_number: usize,
+    pub mode: ParsingMode,
+    pub current_depth: i32,
+    pub seq_pos: Option<SequencePos>,
 
     // Old cursor stuff, deprecated, remove
     /// At the start of the current input line.
@@ -36,6 +93,12 @@ impl<'a> Cursor<'a> {
             current_indent: Vec::new(),
             expected_indent: Vec::new(),
             line_number: 0,
+            mode: ParsingMode::Block(true),
+            // Start at the head of a dummy section encompassing the whole
+            // input. Since input's baseline indent is 0, our starting indent
+            // for the dummy construct around it is -1.
+            current_depth: -1,
+            seq_pos: None,
         }
     }
 
@@ -94,6 +157,131 @@ impl<'a> Cursor<'a> {
             .count();
 
         self.input = &self.input[consumed_len..];
+    }
+}
+
+// Shimmed from V01 deser
+impl<'a> Cursor<'a> {
+    pub fn has_next_token(&mut self) -> bool {
+        use ParsingMode::*;
+        match self.mode {
+            Block(escape_commas) => {
+                let has_headline = if escape_commas {
+                    self.has_headline(self.current_depth)
+                } else {
+                    self.has_remaining_line(self.current_depth)
+                };
+                self.line_depth().map_or(true, |n| n >= self.current_depth)
+                    && (has_headline
+                        || self.has_body_content(self.current_depth))
+            }
+            Line(_) | Word | Key(_) => {
+                self.has_headline_content(self.current_depth)
+            }
+        }
+    }
+
+    /// Consume the next atomic parsing element as string according to current
+    /// parsing mode.
+    ///
+    /// This can be very expensive, it can read a whole file, so only use it
+    /// when you know you need it.
+    pub fn next_token(&mut self) -> Result<Cow<str>> {
+        use ParsingMode::*;
+        match self.mode {
+            Block(escape_comma) => {
+                let block =
+                    self.line_or_block(self.current_depth, escape_comma)?;
+                Ok(Cow::from(block))
+            }
+            Line(true) => {
+                let line = self.line()?;
+                if !line.is_empty() && line.chars().all(|c| c == ',') {
+                    Ok(Cow::from(&line[1..]))
+                } else {
+                    Ok(Cow::from(line))
+                }
+            }
+            Line(false) => Ok(Cow::from(self.line()?)),
+            Word => Ok(Cow::from(self.word()?)),
+            Key(emit_dummy_key) => {
+                let key = if emit_dummy_key {
+                    Ok("_contents".into())
+                } else {
+                    self.key()
+                };
+                // Keys are always a one-shot parse.
+                //
+                // Set block mode to not escaping commas, since the "headline"
+                // will be on the already prefixed by the key line as the key
+                // instead of on its own line and there
+                self.mode = Block(false);
+                Ok(Cow::from(key?))
+            }
+        }
+    }
+
+    /// Move cursor to start of the current headline's body.
+    pub fn enter_body(&mut self) -> Result<()> {
+        let depth = self.line_depth();
+        if depth.map_or(false, |n| n > self.current_depth) {
+            // Missing headline (but there is content, empty lines don't
+            // count), we're done with just incrementing current
+            // depth.
+            self.current_depth += 1;
+            Ok(())
+        } else if depth.map_or(true, |n| n == self.current_depth) {
+            // There is some headline, we need to move past it.
+            // Empty headlines are counted here, since we need to skip over
+            // the line.
+            if self.has_headline_content(self.current_depth) {
+                return err!("enter_body: Unparsed headline input");
+            }
+
+            let _ = self.headline(self.current_depth);
+            self.current_depth += 1;
+            Ok(())
+        } else {
+            err!("enter_body: Out of depth")
+        }
+    }
+
+    pub fn exit_body(&mut self) -> Result<()> {
+        if self.at_end() && self.current_depth > -1 {
+            // Can exit until -1 at EOF.
+            self.current_depth -= 1;
+            return Ok(());
+        }
+
+        let depth = self.line_depth();
+        if depth.map_or(false, |n| n < self.current_depth) {
+            self.current_depth -= 1;
+            Ok(())
+        } else if depth.map_or(true, |n| n == self.current_depth)
+            && !self.has_headline_content(self.current_depth)
+            && !self.has_body_content(self.current_depth)
+        {
+            // No current content, see if next line is out of body
+            let next_depth = self.next_line_depth();
+            if next_depth.map_or(false, |n| n < self.current_depth) {
+                self.line()?;
+                self.current_depth -= 1;
+                Ok(())
+            } else {
+                err!("exit_body: Body not empty")
+            }
+        } else {
+            err!("exit_body: Body not empty")
+        }
+    }
+
+    pub fn exit_line(&mut self) -> Result<()> {
+        if self.has_headline_content(self.current_depth) {
+            err!("exit_line: Unparsed content left in line")
+        } else {
+            let _ = self.line();
+            Ok(())
+        }
     }
 }
 
