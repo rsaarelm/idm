@@ -99,6 +99,47 @@ pub fn blank_line(input: &str) -> Result<()> {
     }
 }
 
+/// Consume consecutive comment and blank lines at or below current indent.
+///
+/// End at the beginning of the first contentful line or the first line above
+/// given indent depth, whichever comes first.
+pub fn non_content<'a: 'b, 'b>(
+    current_indent: &'b IndentString,
+) -> impl Fn(&'a str) -> Result<'a, ()> + 'b {
+    move |input| {
+        let mut pos = input;
+        loop {
+            if r(&mut pos, blank_line).is_ok() {
+                continue;
+            }
+
+            let (indent, mut line) = current_indent.match_next(pos)?;
+
+            if indent.len() != current_indent.len() {
+                // If we're above expected depth, we're out of the block and
+                // should exit.
+                //
+                // If we're *below* the depth, the line is also assumed to be
+                // content, even if it looks like a comment. The standard way
+                // for escaping a comment-looking line is turning a line into
+                // a block:
+                //
+                //     --
+                //       -- bar
+                return Ok(((), pos));
+            }
+
+            if r(&mut line, comment).is_ok() {
+                pos = line;
+                continue;
+            } else {
+                // Not blank, not comment, assume it's content
+                return Ok(((), pos));
+            }
+        }
+    }
+}
+
 /// Parse a line only if it has more indented child lines.
 ///
 /// On success, return the headline and the new indent string for the first
