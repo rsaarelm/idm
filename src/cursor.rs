@@ -84,6 +84,9 @@ pub struct Cursor<'a> {
     line_start: &'a str,
 }
 
+////////////////////////////////
+// Public Cursor API
+
 impl<'a> Cursor<'a> {
     pub fn new(s: &'a str) -> Self {
         Cursor {
@@ -102,65 +105,84 @@ impl<'a> Cursor<'a> {
         }
     }
 
-    /// Format error from parse into an actual error value.
-    fn err<'b>(&'b self, msg: &'b str) -> impl Fn(&str) -> Error + 'b {
-        move |remaining_input| {
-            // If this was tripped, it indicates a bug in the parser functions
-            // where a parser returned an error string that isn't a suffix of
-            // the input string. It should not happen no matter what kind of
-            // malformed input is fed to the parser.
-            debug_assert_eq!(
-                &self.input[self.input.len() - remaining_input.len()..],
-                remaining_input,
-                "Cursor::err: Malformed remaining input slice"
-            );
-
-            // Find out how much ahead of the current line number the error
-            // site is. (Force line number to be at least 1 to account for the
-            // "before start of input" special state.)
-            let line_number = self.line_number.max(1)
-                + self.input[..self.input.len() - remaining_input.len()]
-                    .chars()
-                    .filter(|&c| c == '\n')
-                    .count();
-
-            Error(format!("Line {}: {}", line_number, msg))
+    pub fn can_nest_seq(&self) -> bool {
+        match self.mode {
+            ParsingMode::Line(_) | ParsingMode::Word | ParsingMode::Key(_) => {
+                false
+            }
+            _ => true
         }
     }
 
-    /// Consume input until it matches 'remaining_input'.
-    ///
-    /// This updates line numbers, you should not use other methods to update
-    /// self.input.
-    fn consume_to(&mut self, remaining_input: &str) {
-        let consumed_len = self.input.len() - remaining_input.len();
-
-        if consumed_len == 0 {
-            return;
+    pub fn start_seq(&mut self) -> Result<()> {
+        if !self.can_nest_seq() {
+            return err!("Nested sequence found in inline sequence");
         }
 
-        debug_assert_eq!(
-            &self.input[consumed_len..],
-            remaining_input,
-            "Cursor::consume_to: Malformed remaining input slice"
-        );
-
-        // Exit the "outside of the file" special state the moment any input
-        // is seen.
-        if self.line_number == 0 {
-            self.line_number = 1;
+        let is_inline =
+            self.has_headline_content(self.current_depth);
+        let is_outline =
+            self.has_body_content(self.current_depth);
+        if is_inline && is_outline {
+            return err!("Sequence has both headline and body");
         }
 
-        self.line_number += self.input[..consumed_len]
-            .chars()
-            .filter(|&c| c == '\n')
-            .count();
+        if is_inline {
+            self.mode = ParsingMode::Word;
+        } else {
+            self.mode = ParsingMode::Block(true);
+            self.enter_body()?;
+        }
+        Ok(())
+    }
 
-        self.input = &self.input[consumed_len..];
+    pub fn start_tuple(&mut self, _len: usize) -> Result<()> {
+        if !self.can_nest_seq() {
+            return err!("Nested sequence found in inline sequence");
+        }
+
+        let is_inline =
+            self.has_headline_content(self.current_depth);
+        let is_outline =
+            self.has_body_content(self.current_depth);
+
+        if is_inline && !is_outline {
+            self.mode = ParsingMode::Word;
+        } else if !is_inline && is_outline {
+            self.mode = ParsingMode::Block(true);
+            self.enter_body()?;
+        } else {
+            self.mode = ParsingMode::Line(false);
+        }
+        Ok(())
+    }
+
+    pub fn start_map(&mut self) -> Result<()> {
+        if !self.can_nest_seq() {
+            return err!("Nested sequence found in inline sequence");
+        }
+
+        self.enter_body()
+    }
+
+    pub fn start_struct(&mut self, _fields: &'static [&'static str]) -> Result<()> {
+        if !self.can_nest_seq() {
+            return err!("Nested sequence found in inline sequence");
+        }
+
+        self.enter_body()
+    }
+
+    pub fn end(&mut self) -> Result<()> {
+        if self.at_end() {
+            Ok(())
+        } else {
+            err!("Unparsed trailing input")
+        }
     }
 }
 
-// Shimmed from V01 deser
+// Shimmed from V01 deser, may need refactoring
 impl<'a> Cursor<'a> {
     pub fn has_next_token(&mut self) -> bool {
         use ParsingMode::*;
@@ -221,6 +243,72 @@ impl<'a> Cursor<'a> {
         }
     }
 
+}
+
+////////////////////////////////
+// Private Cursor methods
+
+impl<'a> Cursor<'a> {
+    /// Format error from parse into an actual error value.
+    fn err<'b>(&'b self, msg: &'b str) -> impl Fn(&str) -> Error + 'b {
+        move |remaining_input| {
+            // If this was tripped, it indicates a bug in the parser functions
+            // where a parser returned an error string that isn't a suffix of
+            // the input string. It should not happen no matter what kind of
+            // malformed input is fed to the parser.
+            debug_assert_eq!(
+                &self.input[self.input.len() - remaining_input.len()..],
+                remaining_input,
+                "Cursor::err: Malformed remaining input slice"
+            );
+
+            // Find out how much ahead of the current line number the error
+            // site is. (Force line number to be at least 1 to account for the
+            // "before start of input" special state.)
+            let line_number = self.line_number.max(1)
+                + self.input[..self.input.len() - remaining_input.len()]
+                    .chars()
+                    .filter(|&c| c == '\n')
+                    .count();
+
+            Error(format!("Line {}: {}", line_number, msg))
+        }
+    }
+
+    /// Consume input until it matches 'remaining_input'.
+    ///
+    /// This updates line numbers, you should not use other methods to update
+    /// self.input.
+    fn consume_to(&mut self, remaining_input: &str) {
+        let consumed_len = self.input.len() - remaining_input.len();
+
+        if consumed_len == 0 {
+            return;
+        }
+
+        debug_assert_eq!(
+            &self.input[consumed_len..],
+            remaining_input,
+            "Cursor::consume_to: Malformed remaining input slice"
+        );
+
+        // Exit the "outside of the file" special state the moment any input
+        // is seen.
+        if self.line_number == 0 {
+            self.line_number = 1;
+        }
+
+        self.line_number += self.input[..consumed_len]
+            .chars()
+            .filter(|&c| c == '\n')
+            .count();
+
+        self.input = &self.input[consumed_len..];
+    }
+}
+
+// Shimmed from V01 deser
+impl<'a> Cursor<'a> {
     /// Move cursor to start of the current headline's body.
     pub fn enter_body(&mut self) -> Result<()> {
         let depth = self.line_depth();
@@ -299,7 +387,7 @@ impl<'a> Cursor<'a> {
     /// At expected depth, given the block separator marker ",",
     /// return None.
     /// Escapes block separator syntax.
-    pub fn headline(&mut self, depth: i32) -> Result<Option<&str>> {
+    fn headline(&mut self, depth: i32) -> Result<Option<&str>> {
         if self.input.is_empty() {
             return err!("headline: Out of input");
         }
@@ -330,12 +418,12 @@ impl<'a> Cursor<'a> {
         }
     }
 
-    pub fn has_headline(&self, depth: i32) -> bool {
+    fn has_headline(&self, depth: i32) -> bool {
         self.clone().headline(depth).ok().is_some()
     }
 
     /// Like headline, but does not escape commas.
-    pub fn remaining_line(&mut self, depth: i32) -> Result<Option<&str>> {
+    fn remaining_line(&mut self, depth: i32) -> Result<Option<&str>> {
         if self.input.is_empty() {
             return err!("headline: Out of input");
         }
@@ -358,7 +446,7 @@ impl<'a> Cursor<'a> {
         Ok(Some(line))
     }
 
-    pub fn has_remaining_line(&self, depth: i32) -> bool {
+    fn has_remaining_line(&self, depth: i32) -> bool {
         self.clone().remaining_line(depth).ok().is_some()
     }
 
@@ -373,11 +461,11 @@ impl<'a> Cursor<'a> {
         self.line_depth().is_none()
     }
 
-    pub fn at_end(&self) -> bool {
+    fn at_end(&self) -> bool {
         self.input.chars().all(|c| c.is_whitespace())
     }
 
-    pub fn has_body_content(&self, depth: i32) -> bool {
+    fn has_body_content(&self, depth: i32) -> bool {
         if self.input == "" {
             return false;
         }
@@ -434,7 +522,7 @@ impl<'a> Cursor<'a> {
     /// Read successive verbatim lines at at least given depth.
     ///
     /// Fails when no lines were read.
-    pub fn block(&mut self, depth: i32) -> Result<String> {
+    fn block(&mut self, depth: i32) -> Result<String> {
         if self.input.is_empty() {
             return err!("Out of input");
         }
@@ -475,7 +563,7 @@ impl<'a> Cursor<'a> {
     ///
     /// An element with both a headline with content and body lines will
     /// result an error.
-    pub fn line_or_block(
+    fn line_or_block(
         &mut self,
         depth: i32,
         escape_comma: bool,
@@ -511,7 +599,7 @@ impl<'a> Cursor<'a> {
     }
 
     /// Read next whitespace-separated word from current line.
-    pub fn word(&mut self) -> Result<&str> {
+    fn word(&mut self) -> Result<&str> {
         // Try it out in a clone so we don't change state if no words are
         // found.
         let mut cursor = self.clone();
@@ -556,7 +644,7 @@ impl<'a> Cursor<'a> {
     /// Return line_depth for a line with content.
     ///
     /// Line depth does not make sense for blank lines, so those get `None`.
-    pub fn line_depth(&self) -> Option<i32> {
+    fn line_depth(&self) -> Option<i32> {
         if let Ok((line, _)) = parse::line(self.line_start) {
             if line.chars().all(|c| c.is_whitespace()) {
                 None
@@ -568,7 +656,7 @@ impl<'a> Cursor<'a> {
         }
     }
 
-    pub fn next_line_depth(&self) -> Option<i32> {
+    fn next_line_depth(&self) -> Option<i32> {
         let mut cursor = self.clone();
         let _ = cursor.line();
         // Try reverting to depth of current line (if that is available), when

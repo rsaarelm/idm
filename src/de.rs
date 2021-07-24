@@ -50,11 +50,7 @@ impl<'de> Deserializer<'de> {
 
     /// Ok when there is no more non-whitespace input left
     pub fn end(&mut self) -> Result<()> {
-        if self.cursor.at_end() {
-            Ok(())
-        } else {
-            err!("Unparsed trailing input")
-        }
+        self.cursor.end()
     }
 }
 
@@ -198,41 +194,19 @@ impl<'a, 'de> de::Deserializer<'de> for &'a mut Deserializer<'de> {
     where
         V: de::Visitor<'de>,
     {
-        match self.cursor.mode {
-            ParsingMode::Line(_) | ParsingMode::Word | ParsingMode::Key(_) => {
-                return err!("Nested sequence found in inline sequence");
-            }
-            _ => {}
-        }
+        self.save();  // Return to checkpoint on Option head.
 
         // NB: Merging is only supported for variable-length seqs, not tuples.
         // It would mess up tuple/fixed-width-array matrices otherwise.
         // It's sort of an iffy feature overall, but is needed to make
         // deserializing into the canonical Outline datatype work.
-        if self.cursor.seq_pos == Some(SequencePos::TupleEnd) {
+        if self.cursor.can_nest_seq() && self.cursor.seq_pos == Some(SequencePos::TupleEnd) {
             // Skip entering body when doing merged sequence.
             self.cursor.seq_pos = None;
             return visitor.visit_seq(Sequence::new(self).merged());
         }
 
-        let is_inline =
-            self.cursor.has_headline_content(self.cursor.current_depth);
-        let is_outline =
-            self.cursor.has_body_content(self.cursor.current_depth);
-        if is_inline && is_outline {
-            return err!("Sequence has both headline and body");
-        }
-
-        // Make checkpoint for Option head before entering body.
-        self.save();
-
-        if is_inline {
-            self.cursor.mode = ParsingMode::Word;
-        } else {
-            self.cursor.mode = ParsingMode::Block(true);
-            self.cursor.enter_body()?;
-        }
-
+        self.cursor.start_seq()?;
         visitor.visit_seq(Sequence::new(self))
     }
 
@@ -240,30 +214,8 @@ impl<'a, 'de> de::Deserializer<'de> for &'a mut Deserializer<'de> {
     where
         V: de::Visitor<'de>,
     {
-        match self.cursor.mode {
-            ParsingMode::Line(_) | ParsingMode::Word | ParsingMode::Key(_) => {
-                return err!("Nested sequence in inline sequence");
-            }
-            _ => {}
-        }
-
-        let is_inline =
-            self.cursor.has_headline_content(self.cursor.current_depth);
-        let is_outline =
-            self.cursor.has_body_content(self.cursor.current_depth);
-
-        // Make checkpoint for Option head before entering body.
-        self.save();
-
-        if is_inline && !is_outline {
-            self.cursor.mode = ParsingMode::Word;
-        } else if !is_inline && is_outline {
-            self.cursor.mode = ParsingMode::Block(true);
-            self.cursor.enter_body()?;
-        } else {
-            self.cursor.mode = ParsingMode::Line(false);
-        }
-
+        self.save();  // Return to checkpoint on Option head.
+        self.cursor.start_tuple(len)?;
         visitor.visit_seq(Sequence::new(self).tuple_length(len))
     }
 
@@ -283,14 +235,7 @@ impl<'a, 'de> de::Deserializer<'de> for &'a mut Deserializer<'de> {
     where
         V: de::Visitor<'de>,
     {
-        match self.cursor.mode {
-            ParsingMode::Line(_) | ParsingMode::Word | ParsingMode::Key(_) => {
-                return err!("deserialize_map: Can't nest in inline seq");
-            }
-            _ => {}
-        }
-
-        self.cursor.enter_body()?;
+        self.cursor.start_map()?;
         visitor.visit_map(Sequence::new(self))
     }
 
@@ -303,14 +248,7 @@ impl<'a, 'de> de::Deserializer<'de> for &'a mut Deserializer<'de> {
     where
         V: de::Visitor<'de>,
     {
-        match self.cursor.mode {
-            ParsingMode::Line(_) | ParsingMode::Word | ParsingMode::Key(_) => {
-                return err!("deserialize_struct: Can't nest in inline seq");
-            }
-            _ => {}
-        }
-
-        self.cursor.enter_body()?;
+        self.cursor.start_struct(fields)?;
         visitor.visit_map(Sequence::new(self).as_struct(fields))
     }
 
