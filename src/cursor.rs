@@ -31,14 +31,6 @@ pub enum ParsingMode {
 }
 
 impl ParsingMode {
-    pub fn is_block(self) -> bool {
-        use ParsingMode::*;
-        match self {
-            Block(_) => true,
-            _ => false,
-        }
-    }
-
     pub fn is_inline(self) -> bool {
         use ParsingMode::*;
         match self {
