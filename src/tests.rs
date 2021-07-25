@@ -54,6 +54,7 @@ fn test_nested_sequence() {
 
     test_inexact(
         "\
+,
 \t1
 \t2
 ,
@@ -64,6 +65,7 @@ fn test_nested_sequence() {
 
     test_inexact(
         "\
+,
 \t1
 \t2
 ,
@@ -75,6 +77,7 @@ fn test_nested_sequence() {
     // Outline list of matrices.
     test(
         "\
+,
 \t1 2
 \t3 4
 ,
@@ -85,6 +88,7 @@ fn test_nested_sequence() {
 
     test(
         "\
+,
 \t1 2
 \t3 4
 ,

@@ -369,13 +369,11 @@ impl Expr {
             }
             Seq(es) => {
                 for (i, e) in es.iter().enumerate() {
-                    let print_separator = i > 0;
                     if e.is_block() {
                         // Outline sequence
-                        if print_separator {
-                            indent(f, depth)?;
-                            writeln!(f, ",")?;
-                        }
+                        indent(f, depth)?;
+                        writeln!(f, ",")?;
+
                         // We can give these all prev_depth = depth since past
                         // the first one we print the separator comma here.
                         e.print_outline(f, depth + 1, depth)?;
