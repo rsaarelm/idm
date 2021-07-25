@@ -1,4 +1,7 @@
-use crate::{err, error::Error, error::Result, parse};
+use crate::{
+    err, error::Error, error::Result, indent_string::IndentString, parse,
+    util::Trunc,
+};
 use std::borrow::Cow;
 
 // TODO: New Result type to use with Cursor
@@ -9,14 +12,10 @@ use std::borrow::Cow;
 pub enum ParsingMode {
     /// The most common parsing mode, up to the next element with the same or
     /// higher indent than the current point.
-    ///
-    /// Flag set to true means commas should be escaped
-    Block(bool),
+    Block,
     /// Up to the end of the current line only, even if there are more
     /// indented lines after this.
-    ///
-    /// Flag set to true means commas should be escaped
-    Line(bool),
+    Line,
     /// Single whitespace-separated token. Do not move to next line.
     Word,
     /// Single whitespace-separated token, must have form "key-name:" (valid
@@ -50,6 +49,18 @@ pub enum SequencePos {
     TupleEnd,
 }
 
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+enum Shape {
+    /// Line at current input depth with no child lines
+    BodyLine,
+    /// Headline and child lines at current input depth.
+    Section,
+    /// One or more lines below current input depth.
+    Block,
+}
+
+use Shape::*;
+
 /// State-carrying deserialization cursor.
 ///
 /// `Cursor` stores both the schema information it receives from the
@@ -67,15 +78,9 @@ pub struct Cursor<'a> {
 
     // New stuff, these become the new cursor
     /// Current stack of indentation whitespace strings.
-    current_indent: Vec<&'a str>,
-    /// Expected indent level. Same format as `current_indent`
-    ///
-    /// The shared prefix of current and expected indent must always be
-    /// identical. Expected indent level must be synced with current intent
-    /// before parsing can continue.
-    expected_indent: Vec<&'a str>,
+    current_indent: IndentString,
     /// Line number of current input line.
-    line_number: usize,
+    line_number: i32,
     pub mode: ParsingMode,
     pub current_depth: i32,
     pub seq_pos: Option<SequencePos>,
@@ -90,14 +95,14 @@ pub struct Cursor<'a> {
 
 impl<'a> Cursor<'a> {
     pub fn new(s: &'a str) -> Self {
+        log::debug!("Cursor::new({:?})", Trunc(s));
         Cursor {
             line_start: s,
             input: s,
 
-            current_indent: Vec::new(),
-            expected_indent: Vec::new(),
+            current_indent: Default::default(),
             line_number: 0,
-            mode: ParsingMode::Block(true),
+            mode: ParsingMode::Block,
             // Start at the head of a dummy section encompassing the whole
             // input. Since input's baseline indent is 0, our starting indent
             // for the dummy construct around it is -1.
@@ -106,102 +111,113 @@ impl<'a> Cursor<'a> {
         }
     }
 
-    pub fn can_nest_seq(&self) -> bool {
+    /// Return true if the cursor can enter a new sequence from the current
+    /// state.
+    ///
+    /// If it's already parsing an inline sequence, it can't.
+    pub fn can_start_seq(&self) -> bool {
         match self.mode {
-            ParsingMode::Line(_) | ParsingMode::Word | ParsingMode::Key(_) => {
+            ParsingMode::Line | ParsingMode::Word | ParsingMode::Key(_) => {
                 false
             }
-            _ => true
+            _ => true,
         }
     }
 
     pub fn start_seq(&mut self) -> Result<()> {
-        if !self.can_nest_seq() {
+        log::debug!("Cursor::start_seq at {:?}", Trunc(self.input));
+        if !self.can_start_seq() {
+            log::debug!("Cursor::start_seq cannot nest");
             return err!("Nested sequence found in inline sequence");
         }
 
-        let is_inline =
-            self.has_headline_content(self.current_depth);
-        let is_outline =
-            self.has_body_content(self.current_depth);
-        if is_inline && is_outline {
-            return err!("Sequence has both headline and body");
+        match self.classify()? {
+            BodyLine => {
+                log::debug!("Cursor::start_seq starting inline");
+                self.mode = ParsingMode::Word;
+            }
+            Block => {
+                log::debug!("Cursor::start_seq starting outline");
+                self.mode = ParsingMode::Block;
+                self.start_block()?;
+            }
+            Section => {
+                log::debug!("Cursor::start_seq section sequence is invalid");
+                return err!(
+                    "start_seq: Section shape not allowed for sequence"
+                );
+            }
         }
 
-        if is_inline {
-            self.mode = ParsingMode::Word;
-        } else {
-            self.mode = ParsingMode::Block(true);
-            self.start_body()?;
-        }
         Ok(())
     }
 
     pub fn start_tuple(&mut self, _len: usize) -> Result<()> {
-        if !self.can_nest_seq() {
+        log::debug!("Cursor::start_tuple at {:?}", Trunc(self.input));
+        if !self.can_start_seq() {
+            log::debug!("Cursor::start_tuple cannot nest");
             return err!("Nested sequence found in inline sequence");
         }
 
-        let is_inline =
-            self.has_headline_content(self.current_depth);
-        let is_outline =
-            self.has_body_content(self.current_depth);
-
-        if is_inline && !is_outline {
-            self.mode = ParsingMode::Word;
-        } else if !is_inline && is_outline {
-            self.mode = ParsingMode::Block(true);
-            self.start_body()?;
-        } else {
-            self.mode = ParsingMode::Line(false);
+        match self.classify()? {
+            BodyLine => {
+                log::debug!("Cursor::start_tuple starting inline");
+                self.mode = ParsingMode::Word;
+            }
+            Block => {
+                log::debug!("Cursor::start_tuple starting outline");
+                self.mode = ParsingMode::Block;
+                self.start_block()?;
+            }
+            Section => {
+                log::debug!("Cursor::start_tuple starting section");
+                self.mode = ParsingMode::Line;
+            }
         }
+
         Ok(())
     }
 
     pub fn start_map(&mut self) -> Result<()> {
-        if !self.can_nest_seq() {
+        log::debug!("Cursor::start_map at {:?}", Trunc(self.input));
+        if !self.can_start_seq() {
             return err!("Nested sequence found in inline sequence");
         }
 
-        self.start_body()
+        self.start_block()
     }
 
-    pub fn start_struct(&mut self, _fields: &'static [&'static str]) -> Result<()> {
-        if !self.can_nest_seq() {
+    pub fn start_struct(
+        &mut self,
+        _fields: &'static [&'static str],
+    ) -> Result<()> {
+        log::debug!("Cursor::start_struct at {:?}", Trunc(self.input));
+        if !self.can_start_seq() {
             return err!("Nested sequence found in inline sequence");
         }
 
-        self.start_body()
+        self.start_block()
     }
 
     pub fn end(&mut self) -> Result<()> {
+        log::debug!("Cursor::end at {:?}", Trunc(self.input));
         if self.at_end() {
             Ok(())
         } else {
             err!("Unparsed trailing input")
         }
     }
-}
 
-// Shimmed from V01 deser, may need refactoring
-impl<'a> Cursor<'a> {
-    pub fn has_next_token(&mut self) -> bool {
-        use ParsingMode::*;
-        match self.mode {
-            Block(escape_commas) => {
-                let has_headline = if escape_commas {
-                    self.has_headline(self.current_depth)
-                } else {
-                    self.has_remaining_line(self.current_depth)
-                };
-                self.line_depth().map_or(true, |n| n >= self.current_depth)
-                    && (has_headline
-                        || self.has_body_content(self.current_depth))
-            }
-            Line(_) | Word | Key(_) => {
-                self.has_headline_content(self.current_depth)
-            }
-        }
+    /// Move in position to parse the next sequence token.
+    pub fn seq_advance(&mut self) -> Result<()> {
+        // XXX: Need to do the clone to appease mutable borrow of self.parse.
+        log::debug!("Cursor::seq_advance from {:?}", Trunc(self.input));
+        let ret = self.parse(
+            parse::non_content(&self.current_indent.clone()),
+            "seq_advance: Error parsing non-content",
+        );
+        log::debug!("Cursor::seq_advance to {:?}", Trunc(self.input));
+        ret
     }
 
     /// Consume the next atomic parsing element as string according to current
@@ -211,22 +227,45 @@ impl<'a> Cursor<'a> {
     /// when you know you need it.
     pub fn next_token(&mut self) -> Result<Cow<str>> {
         use ParsingMode::*;
+        log::debug!("Cursor::next_token at {:?}", Trunc(self.input));
+
+        if self.input == "" {
+            return err!("next_token: No input left");
+        }
+
+        if self.before_file_start() {
+            log::debug!(
+                "Cursor::next_token at file start, consuming entire content"
+            );
+            let ret = Cow::from(self.input.trim_end());
+            self.consume_to("");
+            return Ok(ret);
+        }
+
+        let indent_string = self.current_indent.clone();
+
         match self.mode {
-            Block(escape_comma) => {
-                let block =
-                    self.line_or_block(self.current_depth, escape_comma)?;
+            Block => {
+                let block = self.parse(
+                    parse::outline_item(&indent_string),
+                    "next_token: Could not parse outline item",
+                )?;
+                log::debug!(
+                    "Cursor::next_token parsed block {:?}",
+                    Trunc(&block)
+                );
                 Ok(Cow::from(block))
             }
-            Line(true) => {
-                let line = self.line()?;
-                if !line.is_empty() && line.chars().all(|c| c == ',') {
-                    Ok(Cow::from(&line[1..]))
-                } else {
-                    Ok(Cow::from(line))
-                }
+            Line => {
+                let line = Cow::from(self.line()?);
+                log::debug!("Cursor::next_token parsed line {:?}", line);
+                Ok(line)
             }
-            Line(false) => Ok(Cow::from(self.line()?)),
-            Word => Ok(Cow::from(self.word()?)),
+            Word => {
+                let word = Cow::from(self.word()?);
+                log::debug!("Cursor::next_token parsed word {:?}", word);
+                Ok(word)
+            }
             Key(emit_dummy_key) => {
                 let key = if emit_dummy_key {
                     Ok("_contents".into())
@@ -234,16 +273,82 @@ impl<'a> Cursor<'a> {
                     self.key()
                 };
                 // Keys are always a one-shot parse.
-                //
-                // Set block mode to not escaping commas, since the "headline"
-                // will be on the already prefixed by the key line as the key
-                // instead of on its own line and there
-                self.mode = Block(false);
+                self.mode = Block;
+                log::debug!("Cursor::next_token parsed key: {:?}", key);
                 Ok(Cow::from(key?))
             }
         }
     }
 
+    /// Enter an indented body block.
+    pub fn start_block(&mut self) -> Result<()> {
+        log::debug!("Cursor::start_block at {:?}", Trunc(self.input));
+
+        let (new_indent, _) = self
+            .current_indent
+            .match_next(self.input)
+            .map_err(self.err("start_block: Bad indentation"))?;
+
+        if !self.before_file_start()
+            && !(new_indent.len() > self.current_indent.len())
+        {
+            return err!(
+                "start_block: Body does not introduce deeper indentation"
+            );
+        }
+
+        self.start_file();
+        self.current_indent = new_indent;
+        Ok(())
+    }
+
+    /// Leave the block entered with `start_block`.
+    pub fn end_block(&mut self) -> Result<()> {
+        log::debug!("Cursor::end_block at {:?}", Trunc(self.input));
+        if self.at_end() {
+            // Can exit until back at "-1 indent" at end.
+            if !self.current_indent.is_empty() {
+                self.current_indent.pop();
+            } else if !self.after_file_end() {
+                self.line_number = -1;
+            } else {
+                return err!("end_block: Exit not matched by indentation");
+            }
+            return Ok(());
+        }
+
+        let (depth, _) = self
+            .current_indent
+            .match_next(self.input)
+            .map_err(self.err("end_block: Bad indent"))?;
+
+        if depth.len() < self.current_indent.len() {
+            self.current_indent.pop();
+            Ok(())
+        } else {
+            err!("end_block: Block not empty")
+        }
+    }
+
+    pub fn end_line(&mut self) -> Result<()> {
+        if self.input == "" {
+            return Ok(());
+        }
+
+        log::debug!("Cursor::end_line at {:?}", Trunc(&self.input));
+        let line = self.parse(parse::line, "end_line: Failed to read line")?;
+        if !line.chars().all(|c| c.is_whitespace()) {
+            err!("end_line: Unparsed content left in line")
+        } else {
+            Ok(())
+        }
+    }
+
+    pub fn has_next_token(&mut self) -> bool {
+        // XXX: Can be suboptimal if there are big multiline atoms, but at
+        // least it's dead simple.
+        return self.clone().next_token().is_ok();
+    }
 }
 
 ////////////////////////////////
@@ -256,7 +361,10 @@ impl<'a> Cursor<'a> {
     /// propagate to error messages. Make suro to not update cursor's input
     /// position reference outside of this function.
     fn parse<T>(
-        &mut self, f: impl Fn(&'a str) -> parse::Result<T>, err_msg: &str) -> Result<T> {
+        &mut self,
+        f: impl Fn(&'a str) -> parse::Result<T>,
+        err_msg: &str,
+    ) -> Result<T> {
         match f(self.input) {
             Ok((ret, rest)) => {
                 self.consume_to(rest);
@@ -266,6 +374,53 @@ impl<'a> Cursor<'a> {
                 self.consume_to(rest);
                 Err(Error(format!("{}: {}", self.line_number.max(1), err_msg)))
             }
+        }
+    }
+
+    /// Standalone error formatter.
+    fn err<'b>(&'b self, msg: &'b str) -> impl Fn(&str) -> Error + 'b {
+        move |remaining_input| {
+            // If this was tripped, it indicates a bug in the parser functions
+            // where a parser returned an error string that isn't a suffix of
+            // the input string. It should not happen no matter what kind of
+            // malformed input is fed to the parser.
+            debug_assert_eq!(
+                &self.input[self.input.len() - remaining_input.len()..],
+                remaining_input,
+                "Cursor::err: Malformed remaining input slice"
+            );
+
+            // Find out how much ahead of the current line number the error
+            // site is. (Force line number to be at least 1 to account for the
+            // "before start of input" special state.)
+            let line_number = self.line_number.max(1)
+                + self.input[..self.input.len() - remaining_input.len()]
+                    .chars()
+                    .filter(|&c| c == '\n')
+                    .count() as i32;
+
+            Error(format!("{}: {}", line_number, msg))
+        }
+    }
+
+    /// Return true if parsing the file hasn't started yet and special parsing
+    /// rules may be in effect.
+    fn before_file_start(&self) -> bool {
+        self.line_number == 0
+    }
+
+    fn after_file_end(&self) -> bool {
+        self.line_number == -1
+    }
+
+    /// Mark the file parse as started, `before_file_start` rules will no
+    /// longer apply after `start_file` has been called.
+    ///
+    /// Does nothing after the first time it has been called.
+    fn start_file(&mut self) {
+        if self.line_number == 0 {
+            log::debug!("Cursor::start_file Entering file proper");
+            self.line_number = 1;
         }
     }
 
@@ -295,77 +450,39 @@ impl<'a> Cursor<'a> {
         self.line_number += self.input[..consumed_len]
             .chars()
             .filter(|&c| c == '\n')
-            .count();
+            .count() as i32;
 
         self.input = &self.input[consumed_len..];
+    }
+
+    fn classify(&self) -> Result<Shape> {
+        if self.before_file_start() {
+            return Ok(Block);
+        }
+
+        let (line, rest) =
+            parse::indented_line(&self.current_indent, self.input)
+                .map_err(self.err("classify: Couldn't parse indented_line"))?;
+        if line.chars().next().unwrap_or(' ').is_whitespace() {
+            // XXX: We go here if line is empty, should something else happen?
+            Ok(Block)
+        } else {
+            let (new_indent, _) = self
+                .current_indent
+                .match_next(rest)
+                .map_err(self.err("classify: Bad indent"))?;
+
+            if new_indent.len() > self.current_indent.len() {
+                Ok(Section)
+            } else {
+                Ok(BodyLine)
+            }
+        }
     }
 }
 
 // Shimmed from V01 deser
-impl<'a> Cursor<'a> {
-    /// Move cursor to start of the current headline's body.
-    pub fn start_body(&mut self) -> Result<()> {
-        let depth = self.line_depth();
-        if depth.map_or(false, |n| n > self.current_depth) {
-            // Missing headline (but there is content, empty lines don't
-            // count), we're done with just incrementing current
-            // depth.
-            self.current_depth += 1;
-            Ok(())
-        } else if depth.map_or(true, |n| n == self.current_depth) {
-            // There is some headline, we need to move past it.
-            // Empty headlines are counted here, since we need to skip over
-            // the line.
-            if self.has_headline_content(self.current_depth) {
-                return err!("start_body: Unparsed headline input");
-            }
-
-            let _ = self.headline(self.current_depth);
-            self.current_depth += 1;
-            Ok(())
-        } else {
-            err!("start_body: Out of depth")
-        }
-    }
-
-    pub fn end_body(&mut self) -> Result<()> {
-        if self.at_end() && self.current_depth > -1 {
-            // Can exit until -1 at EOF.
-            self.current_depth -= 1;
-            return Ok(());
-        }
-
-        let depth = self.line_depth();
-        if depth.map_or(false, |n| n < self.current_depth) {
-            self.current_depth -= 1;
-            Ok(())
-        } else if depth.map_or(true, |n| n == self.current_depth)
-            && !self.has_headline_content(self.current_depth)
-            && !self.has_body_content(self.current_depth)
-        {
-            // No current content, see if next line is out of body
-            let next_depth = self.next_line_depth();
-            if next_depth.map_or(false, |n| n < self.current_depth) {
-                self.line()?;
-                self.current_depth -= 1;
-                Ok(())
-            } else {
-                err!("end_body: Body not empty")
-            }
-        } else {
-            err!("end_body: Body not empty")
-        }
-    }
-
-    pub fn end_line(&mut self) -> Result<()> {
-        if self.has_headline_content(self.current_depth) {
-            err!("end_line: Unparsed content left in line")
-        } else {
-            let _ = self.line();
-            Ok(())
-        }
-    }
-}
+impl<'a> Cursor<'a> {}
 
 ////////////////////////////////
 // V01 cursor logic
@@ -378,7 +495,7 @@ impl<'a> Cursor<'a> {
     /// If content is deeper than expected, missing headline is implied,
     /// return None.
     /// Fail if content is above the given depth.
-    /// At expected depth, given the block separator marker ",",
+    /// At expected depth, given the block separator marker "--",
     /// return None.
     /// Escapes block separator syntax.
     fn headline(&mut self, depth: i32) -> Result<Option<&str>> {
@@ -401,49 +518,20 @@ impl<'a> Cursor<'a> {
         self.skip_indentation();
 
         let line = self.line()?.trim_end();
-        if line == "," {
+        if line == "--" {
             // Empty block separator. Consume the line but return `None`.
             Ok(None)
-        } else if !line.is_empty() && line.chars().all(|c| c == ',') {
-            // Unescape escaped comma.
-            Ok(Some(&line[1..]))
         } else {
             Ok(Some(line))
         }
     }
 
+    #[deprecated]
     fn has_headline(&self, depth: i32) -> bool {
         self.clone().headline(depth).ok().is_some()
     }
 
-    /// Like headline, but does not escape commas.
-    fn remaining_line(&mut self, depth: i32) -> Result<Option<&str>> {
-        if self.input.is_empty() {
-            return err!("headline: Out of input");
-        }
-
-        if let Some(line_depth) = self.line_depth() {
-            if line_depth > depth {
-                return Ok(None);
-            } else if line_depth < depth {
-                return err!("headline: Above given depth");
-            }
-        } else {
-            // Consume the empty line.
-            self.line()?;
-            return Ok(Some(""));
-        }
-
-        self.skip_indentation();
-
-        let line = self.line()?.trim_end();
-        Ok(Some(line))
-    }
-
-    fn has_remaining_line(&self, depth: i32) -> bool {
-        self.clone().remaining_line(depth).ok().is_some()
-    }
-
+    #[deprecated]
     pub fn has_headline_content(&self, depth: i32) -> bool {
         self.clone()
             .headline(depth)
@@ -557,18 +645,10 @@ impl<'a> Cursor<'a> {
     ///
     /// An element with both a headline with content and body lines will
     /// result an error.
-    fn line_or_block(
-        &mut self,
-        depth: i32,
-        escape_comma: bool,
-    ) -> Result<String> {
+    fn line_or_block(&mut self, depth: i32) -> Result<String> {
         let has_body = self.has_body_content(depth);
 
-        if let Some(s) = if escape_comma {
-            self.headline(depth)?
-        } else {
-            self.remaining_line(depth)?
-        } {
+        if let Some(s) = self.headline(depth)? {
             if !s.is_empty() {
                 if has_body {
                     return err!(
@@ -636,6 +716,7 @@ impl<'a> Cursor<'a> {
     /// Return line_depth for a line with content.
     ///
     /// Line depth does not make sense for blank lines, so those get `None`.
+    #[deprecated]
     fn line_depth(&self) -> Option<i32> {
         if let Ok((line, _)) = parse::line(self.line_start) {
             if line.chars().all(|c| c.is_whitespace()) {

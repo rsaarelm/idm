@@ -137,7 +137,7 @@ impl<'a, 'de> de::Deserializer<'de> for &'a mut Deserializer<'de> {
 
             // Roll back from entering a body
             self.restore();
-            self.cursor.mode = ParsingMode::Line(true);
+            self.cursor.mode = ParsingMode::Line;
         } else if self.cursor.mode.is_inline() {
             // We can't parse a None value in inline mode because there's no
             // notation for a missing inline entry.
@@ -148,9 +148,9 @@ impl<'a, 'de> de::Deserializer<'de> for &'a mut Deserializer<'de> {
             visitor.visit_some(self)
         } else {
             // XXX: Ugly guarantee that empty-marker gets consumed.
-            if let ParsingMode::Line(_) = self.cursor.mode {
+            if let ParsingMode::Line = self.cursor.mode {
                 if self.cursor.clone().verbatim_line(self.cursor.current_depth)
-                    == Ok(",")
+                    == Ok("--")
                 {
                     let _ = self.cursor.line();
                 }
@@ -194,13 +194,15 @@ impl<'a, 'de> de::Deserializer<'de> for &'a mut Deserializer<'de> {
     where
         V: de::Visitor<'de>,
     {
-        self.save();  // Return to checkpoint on Option head.
+        self.save(); // Return to checkpoint on Option head.
 
         // NB: Merging is only supported for variable-length seqs, not tuples.
         // It would mess up tuple/fixed-width-array matrices otherwise.
         // It's sort of an iffy feature overall, but is needed to make
         // deserializing into the canonical Outline datatype work.
-        if self.cursor.can_nest_seq() && self.cursor.seq_pos == Some(SequencePos::TupleEnd) {
+        if self.cursor.can_start_seq()
+            && self.cursor.seq_pos == Some(SequencePos::TupleEnd)
+        {
             // Skip entering body when doing merged sequence.
             self.cursor.seq_pos = None;
             return visitor.visit_seq(Sequence::new(self).merged());
@@ -214,7 +216,7 @@ impl<'a, 'de> de::Deserializer<'de> for &'a mut Deserializer<'de> {
     where
         V: de::Visitor<'de>,
     {
-        self.save();  // Return to checkpoint on Option head.
+        self.save(); // Return to checkpoint on Option head.
         self.cursor.start_tuple(len)?;
         visitor.visit_seq(Sequence::new(self).tuple_length(len))
     }
@@ -338,8 +340,10 @@ impl<'a, 'de> de::SeqAccess<'de> for Sequence<'a, 'de> {
         // Set marker for first or last position of tuple, special parsing
         // rules are in effect in these.
         if self.tuple_length.is_some() && self.idx == 0 {
+            log::debug!("next_element_seed at start of tuple");
             self.de.cursor.seq_pos = Some(SequencePos::TupleStart);
         } else if self.tuple_length == Some(self.idx + 1) {
+            log::debug!("next_element_seed at end of tuple");
             self.de.cursor.seq_pos = Some(SequencePos::TupleEnd);
         } else {
             self.de.cursor.seq_pos = None;
@@ -353,17 +357,25 @@ impl<'a, 'de> de::SeqAccess<'de> for Sequence<'a, 'de> {
         };
 
         if elements_remain {
+            log::debug!("next_element_seed advancing seq");
+            // Walk over noncontent
+            self.de.cursor.seq_advance()?;
+
             // If the first element of tuple is Option type, it may look like
             // there's no next token. So always try to deserialize at tuple
             // start.
 
+            log::debug!("next_element_seed: deserializing element");
             let ret = seed.deserialize(&mut *self.de).map(Some);
 
             // Only ever parse the first item in Line mode, dive in and start
             // doing block from then on.
-            if let ParsingMode::Line(_) = self.de.cursor.mode {
-                self.de.cursor.mode = ParsingMode::Block(true);
+            if let ParsingMode::Line = self.de.cursor.mode {
+                log::debug!("next_element_seed: leaving Line mode");
+                self.de.cursor.mode = ParsingMode::Block;
 
+                self.de.cursor.start_block()?;
+                /*
                 if self.de.cursor.at_empty_line() {
                     // Start body would consume an empty line as headline.
                     // Make it the contents of the next step instead.
@@ -373,27 +385,29 @@ impl<'a, 'de> de::SeqAccess<'de> for Sequence<'a, 'de> {
                     .cursor
                     .clone()
                     .verbatim_line(self.de.cursor.current_depth)
-                    == Ok(",")
+                    == Ok("--")
                 {
                     // Start body would also consume the empty headline
                     // marker, so another early exit condition here.
                     // XXX: This is another bit of ugly special cases...
                     self.de.cursor.current_depth += 1;
-                } else if let Err(_) = self.de.cursor.start_body() {
+                } else if let Err(_) = self.de.cursor.start_block() {
                     // We were forced here because of being in a tuple, but
                     // there's no actual body left, the tuple element will be
                     // empty. Skip trying to enter the body and just increment
                     // the depth.
                     //
-                    // XXX: This relies in start_body not performing mutations
+                    // XXX: This relies in start_block not performing mutations
                     // if it fails.
                     self.de.cursor.current_depth += 1;
                 }
+                */
             }
 
             self.idx += 1;
 
             if let Some(len) = self.tuple_length {
+                log::debug!("next_element_seed: At tuple end, exiting");
                 // At tuple end, we need to exit without extra probing.
                 // Serde knows the tuple is ended and won't be calling
                 // next_element_seed again.
@@ -402,25 +416,26 @@ impl<'a, 'de> de::SeqAccess<'de> for Sequence<'a, 'de> {
                         self.de.cursor.end_line()?;
                     } else {
                         if !self.is_merged {
-                            self.de.cursor.end_body()?;
+                            self.de.cursor.end_block()?;
                         }
                     }
-                    self.de.cursor.mode = ParsingMode::Block(true);
+                    self.de.cursor.mode = ParsingMode::Block;
                     self.de.cursor.seq_pos = None;
                 }
             }
 
             ret
         } else {
+            log::debug!("next_element_seed: No more elements found, exiting");
             // Exit when not finding more elements.
             if self.de.cursor.mode.is_inline() {
                 self.de.cursor.end_line()?;
             } else {
                 if !self.is_merged {
-                    self.de.cursor.end_body()?;
+                    self.de.cursor.end_block()?;
                 }
             }
-            self.de.cursor.mode = ParsingMode::Block(true);
+            self.de.cursor.mode = ParsingMode::Block;
             self.de.cursor.seq_pos = None;
             Ok(None)
         }
@@ -483,7 +498,7 @@ impl<'a, 'de> de::MapAccess<'de> for Sequence<'a, 'de> {
             if self.de.cursor.is_section(self.de.cursor.current_depth) {
                 // Has both headline and body.
                 // Assume full headline is key, body is content.
-                self.de.cursor.mode = ParsingMode::Line(false);
+                self.de.cursor.mode = ParsingMode::Line;
             } else {
                 // Has no body. Assume first headline word is key, rest of
                 // headline is value.
@@ -495,7 +510,7 @@ impl<'a, 'de> de::MapAccess<'de> for Sequence<'a, 'de> {
         // If we're in word mode, drop out of it, first headline item was
         // parsed as key, but the entire rest of the line needs to be value.
         if self.de.cursor.mode == ParsingMode::Word {
-            self.de.cursor.mode = ParsingMode::Block(false);
+            self.de.cursor.mode = ParsingMode::Block;
         }
         ret
     }
@@ -504,15 +519,15 @@ impl<'a, 'de> de::MapAccess<'de> for Sequence<'a, 'de> {
     where
         V: de::DeserializeSeed<'de>,
     {
-        let need_exit = if let ParsingMode::Line(_) = self.de.cursor.mode {
-            self.de.cursor.mode = ParsingMode::Block(false);
+        let need_exit = if let ParsingMode::Line = self.de.cursor.mode {
+            self.de.cursor.mode = ParsingMode::Block;
             true
         } else {
             false
         };
         let ret = seed.deserialize(&mut *self.de);
         if need_exit {
-            self.de.cursor.end_body()?;
+            self.de.cursor.end_block()?;
         }
         ret
     }

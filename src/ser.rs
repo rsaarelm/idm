@@ -278,9 +278,9 @@ impl Expr {
         }
     }
 
-    fn needs_comma_escape(&self) -> bool {
+    fn needs_comment_escape(&self) -> bool {
         match self {
-            Atom(Word(v)) if v.chars().all(|c| c == ',') => true,
+            Atom(Word(w)) if w == "--" || w.starts_with("-- ") => true,
             _ => false,
         }
     }
@@ -333,12 +333,12 @@ impl Expr {
                     Ok(())
                 } else {
                     indent(f, depth)?;
-                    writeln!(f, ",")
+                    writeln!(f, "--")
                 }
             }
-            Expr::Some(e) if e.needs_comma_escape() => {
+            Expr::Some(e) if e.needs_comment_escape() => {
                 indent(f, depth)?;
-                write!(f, ",")?;
+                write!(f, "--")?;
                 e.print_inline(f)?;
                 writeln!(f)
             }
@@ -369,13 +369,10 @@ impl Expr {
             }
             Seq(es) => {
                 for (i, e) in es.iter().enumerate() {
-                    if e.is_block() {
+                    if e.is_block() || e.needs_comment_escape() {
                         // Outline sequence
                         indent(f, depth)?;
-                        writeln!(f, ",")?;
-
-                        // We can give these all prev_depth = depth since past
-                        // the first one we print the separator comma here.
+                        writeln!(f, "--")?;
                         e.print_outline(f, depth + 1, depth)?;
                     } else if e.is_section() {
                         // Outline sequence with headlines as natural
@@ -385,11 +382,6 @@ impl Expr {
                         // the sequence we are
                         let prev_depth = if i == 0 { depth } else { depth + 1 };
                         e.print_outline(f, depth + 1, prev_depth)?;
-                    } else if e.needs_comma_escape() {
-                        indent(f, depth + 1)?;
-                        write!(f, ",")?;
-                        e.print_inline(f)?;
-                        writeln!(f)?;
                     } else {
                         // Inline sequence
                         indent(f, depth + 1)?;
