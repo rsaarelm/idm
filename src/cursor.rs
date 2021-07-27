@@ -241,29 +241,22 @@ impl<'a> Cursor<'a> {
 // Private Cursor methods
 
 impl<'a> Cursor<'a> {
-    /// Format error from parse into an actual error value.
-    fn err<'b>(&'b self, msg: &'b str) -> impl Fn(&str) -> Error + 'b {
-        move |remaining_input| {
-            // If this was tripped, it indicates a bug in the parser functions
-            // where a parser returned an error string that isn't a suffix of
-            // the input string. It should not happen no matter what kind of
-            // malformed input is fed to the parser.
-            debug_assert_eq!(
-                &self.input[self.input.len() - remaining_input.len()..],
-                remaining_input,
-                "Cursor::err: Malformed remaining input slice"
-            );
-
-            // Find out how much ahead of the current line number the error
-            // site is. (Force line number to be at least 1 to account for the
-            // "before start of input" special state.)
-            let line_number = self.line_number.max(1)
-                + self.input[..self.input.len() - remaining_input.len()]
-                    .chars()
-                    .filter(|&c| c == '\n')
-                    .count();
-
-            Error(format!("Line {}: {}", line_number, msg))
+    /// Run a parse function against current cursor state.
+    ///
+    /// Makes sure internal line number count is updated and line numbers
+    /// propagate to error messages. Make suro to not update cursor's input
+    /// position reference outside of this function.
+    fn parse<T>(
+        &mut self, f: impl Fn(&'a str) -> parse::Result<T>, err_msg: &str) -> Result<T> {
+        match f(self.input) {
+            Ok((ret, rest)) => {
+                self.consume_to(rest);
+                Ok(ret)
+            }
+            Err(rest) => {
+                self.consume_to(rest);
+                Err(Error(format!("{}: {}", self.line_number.max(1), err_msg)))
+            }
         }
     }
 
@@ -596,8 +589,7 @@ impl<'a> Cursor<'a> {
         // found.
         let mut cursor = self.clone();
         cursor.skip_indentation();
-        let word = parse::r(&mut cursor.input, parse::word)
-            .map_err(self.err("Expected word"))?;
+        let word = cursor.parse(parse::word, "Expected word")?;
         *self = cursor;
         Ok(word)
     }
@@ -609,10 +601,9 @@ impl<'a> Cursor<'a> {
     pub fn key(&mut self) -> Result<String> {
         let mut cursor = self.clone();
         cursor.skip_indentation();
-        let word = parse::r(&mut cursor.input, parse::key)
-            .map_err(self.err("Expected key"))?;
+        let key = cursor.parse(parse::key, "Expected key")?;
         *self = cursor;
-        Ok(word)
+        Ok(key)
     }
 
     /// Read the rest of the current line.
@@ -626,7 +617,7 @@ impl<'a> Cursor<'a> {
         if let Ok((line, rest)) = parse::line(cursor.input) {
             *self = cursor;
             self.line_start = rest;
-            self.input = rest;
+            self.consume_to(rest);
             Ok(line)
         } else {
             err!("end_line: End of input")
