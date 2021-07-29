@@ -51,11 +51,15 @@ impl IndentString {
         Tabs(vec![1; depth])
     }
 
-    pub fn is_empty(&self) -> bool {
+    fn reset(&mut self, seq: Vec<usize>) {
         match self {
-            Undetermined => true,
-            Spaces(v) => v.is_empty(),
-            Tabs(v) => v.is_empty(),
+            Undetermined => {
+                panic!(
+                    "IndentString::reset: Can't assign to undetermined string"
+                );
+            }
+            Spaces(v) => *self = Spaces(seq),
+            Tabs(v) => *self = Tabs(seq),
         }
     }
 
@@ -173,6 +177,17 @@ impl IndentString {
         }
 
         Ok((ret, pos))
+    }
+
+    /// Like `match_next`, but indent must be equal to self.
+    pub fn match_same<'a>(&self, input: &'a str) -> Result<'a, IndentString> {
+        let mut pos = input;
+        let next = parse::r(&mut pos, |input| self.match_next(input))?;
+        if &next == self {
+            Ok((next, pos))
+        } else {
+            Err(input)
+        }
     }
 }
 

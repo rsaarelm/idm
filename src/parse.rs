@@ -1,4 +1,8 @@
 //! Stateless parsing primitives
+//!
+//! This is the bottom level of the parsing system. Things should be pushed
+//! here whenever they conveniently can, because stateless functions are
+//! easier to reason about than a stateful cursor.
 
 use crate::indent_string::IndentString;
 
@@ -13,6 +17,36 @@ pub fn r<'a, T>(
         *s = rest;
         ret
     })
+}
+
+/// Return an item of an outline sequence at the given depth.
+///
+/// Items can be sections or body lines (childless headlines) at current
+/// indent or blocks below current indent. Body line output will have indent
+/// removed to the beginning of the line, sections will have global indent
+/// removed to the beginning of the headline and blocks will have indent
+/// removed until the leftmost line of the block has no indent.
+///
+/// It is assumed that before `outline_item` was called, comments and blank
+/// lines at the expected depth have been skipped over. The block element is
+/// assumed to start immediately below the current indent, and blank lines at
+/// the start of a block are expected to belong to the content instead of
+/// being between-element space.
+pub fn outline_item<'a: 'b, 'b>(
+    current_indent: &'b IndentString,
+) -> impl Fn(&'a str) -> Result<'a, String> + 'b {
+    move |input| {
+        let (local_indent, _) = current_indent.match_next(input)?;
+        if local_indent.len() < current_indent.len() {
+            // No items
+            Err(input)
+        } else if local_indent.len() > current_indent.len() {
+            // A block
+            indented_body(current_indent, input)
+        } else {
+            section(current_indent, input)
+        }
+    }
 }
 
 /// Read the next whitespace-separated word on current line.
@@ -88,6 +122,30 @@ pub fn comment(input: &str) -> Result<&str> {
     }
 }
 
+fn indented_comment<'a, 'b>(
+    current_indent: &'b IndentString,
+    input: &'a str,
+) -> Result<'a, &'a str> {
+    let mut pos = input;
+    r(&mut pos, |input| current_indent.match_same(input))?;
+    comment(pos)
+}
+
+/// Match one or more comments at exactly given depth.
+fn indented_comments<'a, 'b>(
+    current_indent: &'b IndentString,
+    input: &'a str,
+) -> Result<'a, ()> {
+    let mut pos = input;
+    // Must match once.
+    r(&mut pos, |input| indented_comment(current_indent, input))?;
+    // Can match any number of times after the first one.
+    while let Ok(_) =
+        r(&mut pos, |input| indented_comment(current_indent, input))
+    {}
+    Ok(((), pos))
+}
+
 pub fn blank_line(input: &str) -> Result<()> {
     let (line, rest) = line(input)?;
 
@@ -99,42 +157,61 @@ pub fn blank_line(input: &str) -> Result<()> {
     }
 }
 
+/// Match one or more blank lines.
+pub fn blank_lines(input: &str) -> Result<()> {
+    let mut pos = input;
+    r(&mut pos, blank_line)?;
+    while let Ok(_) = r(&mut pos, blank_line) {}
+    Ok(((), pos))
+}
+
 /// Consume consecutive comment and blank lines at or below current indent.
 ///
 /// End at the beginning of the first contentful line or the first line above
 /// given indent depth, whichever comes first.
+///
+/// Blank lines that are followed by a contentful line below the expected
+/// indent depth will not be parsed into `non_content`. Instead, they are
+/// assumed to be the prefix of the indented text block.
 pub fn non_content<'a: 'b, 'b>(
     current_indent: &'b IndentString,
 ) -> impl Fn(&'a str) -> Result<'a, ()> + 'b {
     move |input| {
         let mut pos = input;
         loop {
-            if r(&mut pos, blank_line).is_ok() {
+            // Eat one or more comment lines at exactly the expected indent
+            if r(&mut pos, |input| indented_comments(current_indent, input))
+                .is_ok()
+            {
                 continue;
             }
+            // There will be either blanks or content at cursor at this point.
+            if blank_line(pos).is_err() {
+                // Looks like content right after comment, we can stop here.
+                if pos == input {
+                    return Err(input);
+                } else {
+                    return Ok(((), pos));
+                }
+            }
 
-            let (indent, mut line) = current_indent.match_next(pos)?;
+            // Remember pos before blanks, we may need to backtrack.
+            let mut pos2 = pos;
 
-            if indent.len() != current_indent.len() {
-                // If we're above expected depth, we're out of the block and
-                // should exit.
-                //
-                // If we're *below* the depth, the line is also assumed to be
-                // content, even if it looks like a comment. The standard way
-                // for escaping a comment-looking line is turning a line into
-                // a block:
-                //
-                //     --
-                //       -- bar
+            // Consume blanks.
+            r(&mut pos2, blank_lines)?;
+            let (indent, mut line) = current_indent.match_next(pos2)?;
+
+            if indent.len() < current_indent.len() {
+                // Block has ended, exit
+                return Ok(((), pos2));
+            } else if indent.len() > current_indent.len() {
+                // The blanks preceded a block that was indented deeper,
+                // exit but do not consume the last batch of blanks. This is
+                // why we kept pos around.
                 return Ok(((), pos));
-            }
-
-            if r(&mut line, comment).is_ok() {
-                pos = line;
-                continue;
             } else {
-                // Not blank, not comment, assume it's content
-                return Ok(((), pos));
+                pos = pos2;
             }
         }
     }
@@ -173,6 +250,58 @@ pub fn headline<'a: 'b, 'b>(
     }
 }
 
+/// Read a headline at indent level and any child lines it has into one String
+/// result.
+pub fn section<'a, 'b>(
+    prev: &'b IndentString,
+    input: &'a str,
+) -> Result<'a, String> {
+    let mut pos = input;
+    let mut ret = String::new();
+
+    loop {
+        match indented_line(prev, pos) {
+            Ok((line, rest)) => {
+                if !ret.is_empty() {
+                    if line.chars().next().map_or(false, |c| !c.is_whitespace())
+                    {
+                        // We're past the first line and this looks like
+                        // another headline, abort.
+                        return Ok((ret, pos));
+                    }
+
+                    // Funny ordering for newlines so the final newline will be
+                    // skipped.
+                    ret.push('\n');
+                }
+                ret += line;
+                pos = rest;
+            }
+            Err(_) => {
+                // Ran out of indented lines, exit.
+                return Ok((ret, pos));
+            }
+        }
+    }
+}
+
+pub fn indented_line<'a, 'b>(
+    prev: &'b IndentString,
+    input: &'a str,
+) -> Result<'a, &'a str> {
+    let mut pos = input;
+    // Eat indent up to the expected level.
+    let indent = r(&mut pos, |a| prev.match_next(a))?;
+
+    // If the new level is above expected, we don't have our line. Exit.
+    if indent.len() < prev.len() {
+        return Err(input);
+    }
+
+    // Once the indent has been verified and skipped, use regular line parse.
+    line(pos)
+}
+
 /// Read body indented beyond previous indentation.
 ///
 /// Input is assumed to be at the start of the line for the first line of the
@@ -185,8 +314,8 @@ pub fn headline<'a: 'b, 'b>(
 ///
 /// As a special case, if `previous` indentation is empty, the entire input is
 /// assumed to belong to the body and will just be returned as is.
-pub fn indented_body<'a>(
-    prev: &'a IndentString,
+pub fn indented_body<'a, 'b>(
+    prev: &'b IndentString,
     input: &'a str,
 ) -> Result<'a, String> {
     // Special case if there's no expected initial indentation, return input

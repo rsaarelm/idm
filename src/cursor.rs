@@ -50,7 +50,16 @@ pub enum SequencePos {
     TupleEnd,
 }
 
-/// Low-level text processing for deserializer.
+/// State-carrying deserialization cursor.
+///
+/// `Cursor` stores both the schema information it receives from the
+/// deserializer and features of the input structure it infers from the input
+/// text.
+///
+/// A `Cursor` is reasonably lightweight and can be cloned. This can be useful
+/// if there are multiple possible parsing tracks and no easy way to
+/// distinguish between them until further schema information becomes
+/// available.
 #[derive(Clone)]
 pub struct Cursor<'a> {
     /// At the start of the next input token on current line.
