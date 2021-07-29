@@ -4,6 +4,25 @@
 //! here whenever they conveniently can, because stateless functions are
 //! easier to reason about than a stateful cursor.
 
+// NB. Parsing multi-line items that care about indentation levels is tricky.
+// Inconsistent indentation (eg. indentation by tabs following indentation by
+// spaces) is always an unrecoverable error, but the parse
+// API idiom is using Err to signal general failure to parse a primitive,
+// which might also be a recoverable situation. It's therefore possible that
+// parts of the parsing process appear to skip over a line of inconsistent
+// indentation without immediately propagating an error, since the error is
+// treated as just failing to parse that particular parse element (ie. an
+// incorrectly indented comment line is treated as "this line is not
+// syntactically a comment, try something else"). Every part of the file must
+// be ultimately parsed by some primitive though, so as long as there are no
+// buggy primitives that accept a line with inconsistent indentation, the
+// complete parse should still reliably fail at the point of bad indentation.
+//
+// XXX: The current approach does have the problem that the cause of error is
+// not propagated up from the parse routine. The higher level can tell there
+// was a parsing error with a specific primitive, but not that it was caused
+// by inconsistent indentation specifically.
+
 use crate::indent_string::IndentString;
 
 pub type Result<'a, T> = std::result::Result<(T, &'a str), &'a str>;
@@ -188,30 +207,24 @@ pub fn non_content<'a: 'b, 'b>(
             // There will be either blanks or content at cursor at this point.
             if blank_line(pos).is_err() {
                 // Looks like content right after comment, we can stop here.
-                if pos == input {
-                    return Err(input);
-                } else {
-                    return Ok(((), pos));
-                }
+                return Ok(((), pos));
             }
 
             // Remember pos before blanks, we may need to backtrack.
-            let mut pos2 = pos;
+            let old_pos = pos;
 
             // Consume blanks.
-            r(&mut pos2, blank_lines)?;
-            let (indent, mut line) = current_indent.match_next(pos2)?;
+            r(&mut pos, blank_lines)?;
+            let (indent, _) = current_indent.match_next(pos)?;
 
             if indent.len() < current_indent.len() {
                 // Block has ended, exit
-                return Ok(((), pos2));
+                return Ok(((), pos));
             } else if indent.len() > current_indent.len() {
                 // The blanks preceded a block that was indented deeper,
                 // exit but do not consume the last batch of blanks. This is
                 // why we kept pos around.
-                return Ok(((), pos));
-            } else {
-                pos = pos2;
+                return Ok(((), old_pos));
             }
         }
     }
@@ -600,6 +613,128 @@ a
   b"
             ),
             Ok((("a", IndentString::new(1)), "\n  b"))
+        );
+    }
+
+    #[test]
+    fn test_non_content() {
+        let empty = IndentString::default();
+
+        assert_eq!(non_content(&empty)(""), Ok(((), "")));
+        assert_eq!(non_content(&empty)("abc"), Ok(((), "abc")));
+        assert_eq!(non_content(&empty)("\nabc"), Ok(((), "abc")));
+
+        assert_eq!(
+            non_content(&empty)(
+                "\
+--
+abc"
+            ),
+            Ok(((), "abc"))
+        );
+
+        assert_eq!(
+            non_content(&empty)(
+                "\
+-- Comment content
+abc"
+            ),
+            Ok(((), "abc"))
+        );
+
+        // Must have space between -- and comment body
+        assert_eq!(
+            non_content(&empty)(
+                "\
+--notcomment
+abc"
+            ),
+            Ok(((), "--notcomment\nabc"))
+        );
+
+        assert_eq!(
+            non_content(&empty)(
+                "\
+-- Comment and space
+
+abc"
+            ),
+            Ok(((), "abc"))
+        );
+
+        assert_eq!(
+            non_content(&empty)(
+                "\
+-- Complex sequence
+-- multiple lines
+
+
+-- And more comments
+
+-- And more space...
+
+abc"
+            ),
+            Ok(((), "abc"))
+        );
+
+        assert_eq!(
+            non_content(&empty)(
+                "\
+-- Space is different if content after it is indented
+
+  abc"
+            ),
+            Ok(((), "\n  abc"))
+        );
+
+        assert_eq!(
+            non_content(&empty)(
+                "\
+-- Stick to your depth, don't indent comments.
+  --"
+            ),
+            Ok(((), "  --"))
+        );
+
+        // Using preset indentation level
+        let space = IndentString::new(1);
+
+        assert_eq!(
+            non_content(&space)(
+                "\
+-- abc"
+            ),
+            Ok(((), "-- abc"))
+        );
+
+        assert_eq!(
+            non_content(&space)(
+                "  -- abc
+  xyz"
+            ),
+            Ok(((), "  xyz"))
+        );
+
+        // It can actually fail if indent is screwy.
+        assert_eq!(
+            non_content(&space)(
+                "  -- abc
+-- Out of depth"
+            ),
+            Ok(((), "-- Out of depth"))
+        );
+
+        // Case with inconsistent indentation.
+        // NB: This just bails out with Ok instead of returning Err as you might
+        // expect. The important part is that it does not consume the invalid
+        // line, leaving it for the next parse step to tumble over.
+        assert_eq!(
+            non_content(&space)(
+                "  -- abc
+\t-- This is bad"
+            ),
+            Ok(((), "\t-- This is bad"))
         );
     }
 }
