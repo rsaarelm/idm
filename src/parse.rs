@@ -320,32 +320,16 @@ pub fn indented_line<'a, 'b>(
 /// Read body indented beyond previous indentation.
 ///
 /// Input is assumed to be at the start of the line for the first line of the
-/// indented body. All body lines must be indented deeper than the previous
+/// indented body. All body lines must be indented deeper than the given
 /// indentation. The function will look for the line with the shallowest
-/// indentation deeper than the previous indentation, and use that as the
-/// common new indentation prefix. All body lines must have consistent
-/// indentation with this prefix, but their indentation beyond the prefix is
-/// ignored. The resulting string will have the prefix indentations stripped.
-///
-/// As a special case, if `previous` indentation is empty, the entire input is
-/// assumed to belong to the body and will just be returned as is.
+/// indentation deeper than the given indentation, and use that as the common
+/// new indentation prefix. All body lines must have consistent indentation
+/// with this prefix, but their indentation beyond the prefix is ignored. The
+/// resulting string will have the prefix indentations stripped.
 pub fn indented_body<'a, 'b>(
     prev: &'b IndentString,
     input: &'a str,
 ) -> Result<'a, String> {
-    // Special case if there's no expected initial indentation, return input
-    // as is.
-    //
-    // XXX: To keep things less surprising, this could be modified to check if
-    // all of the input lines still have a shared indent prefix and stripping
-    // that prefix if there is (and erroring out if the global indentation is
-    // inconsistent with tabs and spaces). Otherwise there's an unspoken
-    // assumption that `indented_body` never returns values with a global
-    // indentation, which is violated by the zero starting indent case.
-    if prev.is_empty() {
-        return Ok((input.trim_end().into(), ""));
-    }
-
     // Find the minimum indent.
     let (mut indent, _) = prev.match_next(input)?;
     if indent.len() == prev.len() {
@@ -485,11 +469,11 @@ mod tests {
         let empty = IndentString::default();
         let space_1 = IndentString::Spaces(vec![1]);
         let space_2 = IndentString::Spaces(vec![1, 1]);
-        assert_eq!(indented_body(&empty, ""), Ok(("".into(), "")));
-        assert_eq!(indented_body(&empty, "a"), Ok(("a".into(), "")));
-        assert_eq!(indented_body(&empty, "a\nb"), Ok(("a\nb".into(), "")));
-        assert_eq!(indented_body(&empty, "  a\nb"), Ok(("  a\nb".into(), "")));
-        assert_eq!(indented_body(&empty, "a\nb\n"), Ok(("a\nb".into(), "")));
+        assert_eq!(indented_body(&empty, ""), Err(""));
+        assert_eq!(indented_body(&empty, "a"), Err("a"));
+        assert_eq!(indented_body(&empty, "a\n b"), Err("a\n b"));
+        assert_eq!(indented_body(&empty, " a\n b"), Ok(("a\nb".into(), "")));
+        assert_eq!(indented_body(&empty, "  a\n b"), Ok((" a\nb".into(), "")));
 
         assert_eq!(indented_body(&space_1, "  a\n b"), Ok(("a".into(), " b")));
         assert_eq!(
@@ -745,5 +729,23 @@ abc"
             ),
             Ok(((), "\t-- This is bad"))
         );
+    }
+
+    #[test]
+    fn test_outline_item() {
+        let empty = IndentString::default();
+
+        assert_eq!(outline_item(&empty)("abc"), Ok(("abc".into(), "")));
+        assert_eq!(outline_item(&empty)("abc\ndef"), Ok(("abc".into(), "def")));
+        assert_eq!(outline_item(&empty)("  abc"), Ok(("abc".into(), "")));
+        assert_eq!(outline_item(&empty)("  abc\n  def"), Ok(("abc\ndef".into(), "")));
+
+        let space = IndentString::new(1);
+        assert_eq!(outline_item(&space)("abc"), Err("abc"));
+        assert_eq!(outline_item(&space)("  abc"), Ok(("abc".into(), "")));
+        assert_eq!(outline_item(&space)("    abc"), Ok(("abc".into(), "")));
+        assert_eq!(outline_item(&space)("    abc\n    def"), Ok(("abc\ndef".into(), "")));
+        assert_eq!(outline_item(&space)("    abc\n  def"), Ok(("abc".into(), "  def")));
+        assert_eq!(outline_item(&space)("  abc\n  def"), Ok(("abc".into(), "  def")));
     }
 }
