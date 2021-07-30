@@ -298,6 +298,7 @@ pub fn section<'a, 'b>(
     }
 }
 
+/// Return line at or above the given indent level.
 pub fn indented_line<'a, 'b>(
     prev: &'b IndentString,
     input: &'a str,
@@ -312,7 +313,8 @@ pub fn indented_line<'a, 'b>(
     }
 
     // Once the indent has been verified and skipped, use regular line parse.
-    line(pos)
+    // Preserve indentation past the given level.
+    line(&input[prev.str_len()..])
 }
 
 /// Read body indented beyond previous indentation.
@@ -566,6 +568,13 @@ mod tests {
                 ""
             ))
         );
+    }
+
+    #[test]
+    fn test_section() {
+        let empty = IndentString::default();
+
+        assert_eq!(section(&empty, "bar\n  baz"), Ok(("bar\n  baz".into(), "")));
     }
 
     #[test]

@@ -51,6 +51,10 @@ impl IndentString {
         Tabs(vec![1; depth])
     }
 
+    pub fn str_len(&self) -> usize {
+        self.iter().sum()
+    }
+
     fn reset(&mut self, seq: Vec<usize>) {
         match self {
             Undetermined => {
