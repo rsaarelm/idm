@@ -95,7 +95,7 @@ pub struct Cursor<'a> {
 
 impl<'a> Cursor<'a> {
     pub fn new(s: &'a str) -> Self {
-        log::debug!("Cursor::new({:?})", Trunc(s));
+        log::debug!("\x1b[1;32mCursor::new({:?})\x1b[0m", Trunc(s));
         Cursor {
             line_start: s,
             input: s,
@@ -210,13 +210,20 @@ impl<'a> Cursor<'a> {
 
     /// Move in position to parse the next sequence token.
     pub fn seq_advance(&mut self) -> Result<()> {
+        let old_input = self.input;
+
         // XXX: Need to do the clone to appease mutable borrow of self.parse.
-        log::debug!("Cursor::seq_advance from {:?}", Trunc(self.input));
         let ret = self.parse(
             parse::non_content(&self.current_indent.clone()),
             "seq_advance: Error parsing non-content",
         );
-        log::debug!("Cursor::seq_advance to {:?}", Trunc(self.input));
+
+        if old_input != self.input {
+            log::debug!("Cursor::seq_advance skipped {:?} to {:?}",
+                Trunc(&old_input[..(old_input.len()-self.input.len())]),
+                Trunc(self.input));
+        }
+
         ret
     }
 
