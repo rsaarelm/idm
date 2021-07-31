@@ -219,9 +219,11 @@ impl<'a> Cursor<'a> {
         );
 
         if old_input != self.input {
-            log::debug!("Cursor::seq_advance skipped {:?} to {:?}",
-                Trunc(&old_input[..(old_input.len()-self.input.len())]),
-                Trunc(self.input));
+            log::debug!(
+                "Cursor::seq_advance skipped {:?} to {:?}",
+                Trunc(&old_input[..(old_input.len() - self.input.len())]),
+                Trunc(self.input)
+            );
         }
 
         ret
@@ -505,6 +507,7 @@ impl<'a> Cursor<'a> {
     /// At expected depth, given the block separator marker "--",
     /// return None.
     /// Escapes block separator syntax.
+    #[deprecated]
     fn headline(&mut self, depth: i32) -> Result<Option<&str>> {
         if self.input.is_empty() {
             return err!("headline: Out of input");
@@ -534,11 +537,6 @@ impl<'a> Cursor<'a> {
     }
 
     #[deprecated]
-    fn has_headline(&self, depth: i32) -> bool {
-        self.clone().headline(depth).ok().is_some()
-    }
-
-    #[deprecated]
     pub fn has_headline_content(&self, depth: i32) -> bool {
         self.clone()
             .headline(depth)
@@ -546,6 +544,7 @@ impl<'a> Cursor<'a> {
             .map_or(false, |s| !s.trim_end().is_empty())
     }
 
+    #[deprecated]
     pub fn at_empty_line(&self) -> bool {
         self.line_depth().is_none()
     }
@@ -554,6 +553,7 @@ impl<'a> Cursor<'a> {
         self.input.chars().all(|c| c.is_whitespace())
     }
 
+    #[deprecated]
     fn has_body_content(&self, depth: i32) -> bool {
         if self.input == "" {
             return false;
@@ -573,6 +573,7 @@ impl<'a> Cursor<'a> {
     }
 
     /// Content is section-shaped, ie. has both headline and body content.
+    #[deprecated]
     pub fn is_section(&self, depth: i32) -> bool {
         self.has_headline_content(depth) && self.has_body_content(depth)
     }
@@ -581,6 +582,7 @@ impl<'a> Cursor<'a> {
     ///
     /// Does not escape block separator syntax. Keeps identation past the
     /// given indent level.
+    #[deprecated]
     pub fn verbatim_line(&mut self, depth: i32) -> Result<&'a str> {
         debug_assert!(
             self.line_start == self.input,
@@ -605,77 +607,6 @@ impl<'a> Cursor<'a> {
             Ok(result)
         } else {
             err!("verbatim_line: EOF")
-        }
-    }
-
-    /// Read successive verbatim lines at at least given depth.
-    ///
-    /// Fails when no lines were read.
-    fn block(&mut self, depth: i32) -> Result<String> {
-        if self.input.is_empty() {
-            return err!("Out of input");
-        }
-
-        let mut result = String::new();
-        let mut first = true;
-        while let Ok(line) = self.verbatim_line(depth.max(0)) {
-            // Newlines before subsequent lines.
-            if !first {
-                result.push('\n');
-            } else {
-                first = false;
-            }
-            let line = line.trim_end();
-
-            // Generated indentation for negative depth.
-            // (But only for non-empty lines, no trailing space.)
-            if !line.is_empty() {
-                for _ in 0..(-depth) {
-                    result.push('\t');
-                }
-                result.push_str(line);
-            }
-        }
-        if first {
-            err!("No block content found")
-        } else {
-            Ok(result)
-        }
-    }
-
-    /// Reads next outline element that's either a line or a block.
-    ///
-    /// A line element is a single line at given depth with no body. A block
-    /// element has an empty headline at the given depth and one or more body
-    /// lines above the given depth. The lines of the block element will have
-    /// `depth + 1` indent levels dedented from them.
-    ///
-    /// An element with both a headline with content and body lines will
-    /// result an error.
-    fn line_or_block(&mut self, depth: i32) -> Result<String> {
-        let has_body = self.has_body_content(depth);
-
-        if let Some(s) = self.headline(depth)? {
-            if !s.is_empty() {
-                if has_body {
-                    return err!(
-                        "line_or_block: Section-shaped element, has both parts"
-                    );
-                }
-                return Ok(s.to_string());
-            } else {
-                if !has_body {
-                    return Ok("".into());
-                }
-            }
-        }
-
-        if has_body {
-            // Block separator headline will have been consumed by
-            // self.headline.
-            Ok(self.block(depth + 1)?)
-        } else {
-            err!("line_or_block: No input")
         }
     }
 
@@ -706,6 +637,7 @@ impl<'a> Cursor<'a> {
     ///
     /// Does not return content already consumed by `word` or `key`. Never
     /// returns initial line indentation.
+    #[deprecated]
     pub fn line(&mut self) -> Result<&str> {
         let mut cursor = self.clone();
         cursor.skip_indentation();
@@ -736,18 +668,7 @@ impl<'a> Cursor<'a> {
         }
     }
 
-    fn next_line_depth(&self) -> Option<i32> {
-        let mut cursor = self.clone();
-        let _ = cursor.line();
-        // Try reverting to depth of current line (if that is available), when
-        // next line is blank but we're not at the end of input.
-        if cursor.input.is_empty() {
-            None
-        } else {
-            cursor.line_depth().or_else(|| self.line_depth())
-        }
-    }
-
+    #[deprecated]
     fn skip_indentation(&mut self) {
         while self.input.chars().next() == Some('\t') {
             self.input = &self.input[1..];

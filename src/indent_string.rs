@@ -67,18 +67,6 @@ impl IndentString {
         }
     }
 
-    fn reset(&mut self, seq: Vec<usize>) {
-        match self {
-            Undetermined => {
-                panic!(
-                    "IndentString::reset: Can't assign to undetermined string"
-                );
-            }
-            Spaces(v) => *self = Spaces(seq),
-            Tabs(v) => *self = Tabs(seq),
-        }
-    }
-
     fn accepting(c: char) -> IndentString {
         match c {
             ' ' => Spaces(Vec::new()),

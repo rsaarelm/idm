@@ -230,39 +230,6 @@ pub fn non_content<'a: 'b, 'b>(
     }
 }
 
-/// Parse a line only if it has more indented child lines.
-///
-/// On success, return the headline and the new indent string for the first
-/// non-empty child line. Leave cursor at the start of the line after the
-/// headline.
-pub fn headline<'a: 'b, 'b>(
-    current_indent: &'b IndentString,
-) -> impl Fn(&'a str) -> Result<'a, (&'a str, IndentString)> + 'b {
-    move |input| {
-        let (ret, rest) = line(input)?;
-        let mut pos = rest;
-        loop {
-            if pos == "" {
-                return Err(input);
-            }
-
-            // Skip over blank lines until we get something that actually has
-            // a defined indent depth.
-            if let Ok((_, rest)) = blank_line(pos) {
-                pos = rest;
-                continue;
-            }
-
-            let indent = current_indent.match_next(pos)?.0;
-            return if indent.len() > current_indent.len() {
-                Ok(((ret, indent), rest))
-            } else {
-                Err(input)
-            };
-        }
-    }
-}
-
 /// Read a headline at indent level and any child lines it has into one String
 /// result.
 pub fn section<'a, 'b>(
@@ -558,54 +525,9 @@ mod tests {
     fn test_section() {
         let empty = IndentString::default();
 
-        assert_eq!(section(&empty, "bar\n  baz"), Ok(("bar\n  baz".into(), "")));
-    }
-
-    #[test]
-    fn test_headline() {
-        let empty = IndentString::default();
-
-        assert_eq!(headline(&empty)(""), Err(""));
-        assert_eq!(headline(&empty)("a"), Err("a"));
-        assert_eq!(headline(&empty)("\n"), Err("\n"));
-        assert_eq!(headline(&empty)("a\n"), Err("a\n"));
-
         assert_eq!(
-            headline(&empty)(
-                "\
-a
-b"
-            ),
-            Err("a\nb")
-        );
-
-        assert_eq!(
-            headline(&empty)(
-                "\
-a
-
-b"
-            ),
-            Err("a\n\nb")
-        );
-
-        assert_eq!(
-            headline(&empty)(
-                "\
-a
-  b"
-            ),
-            Ok((("a", IndentString::new(1)), "  b"))
-        );
-
-        assert_eq!(
-            headline(&empty)(
-                "\
-a
-
-  b"
-            ),
-            Ok((("a", IndentString::new(1)), "\n  b"))
+            section(&empty, "bar\n  baz"),
+            Ok(("bar\n  baz".into(), ""))
         );
     }
 
@@ -738,14 +660,26 @@ abc"
         assert_eq!(outline_item(&empty)("abc"), Ok(("abc".into(), "")));
         assert_eq!(outline_item(&empty)("abc\ndef"), Ok(("abc".into(), "def")));
         assert_eq!(outline_item(&empty)("  abc"), Ok(("abc".into(), "")));
-        assert_eq!(outline_item(&empty)("  abc\n  def"), Ok(("abc\ndef".into(), "")));
+        assert_eq!(
+            outline_item(&empty)("  abc\n  def"),
+            Ok(("abc\ndef".into(), ""))
+        );
 
         let space = IndentString::new(1);
         assert_eq!(outline_item(&space)("abc"), Err("abc"));
         assert_eq!(outline_item(&space)("  abc"), Ok(("abc".into(), "")));
         assert_eq!(outline_item(&space)("    abc"), Ok(("abc".into(), "")));
-        assert_eq!(outline_item(&space)("    abc\n    def"), Ok(("abc\ndef".into(), "")));
-        assert_eq!(outline_item(&space)("    abc\n  def"), Ok(("abc".into(), "  def")));
-        assert_eq!(outline_item(&space)("  abc\n  def"), Ok(("abc".into(), "  def")));
+        assert_eq!(
+            outline_item(&space)("    abc\n    def"),
+            Ok(("abc\ndef".into(), ""))
+        );
+        assert_eq!(
+            outline_item(&space)("    abc\n  def"),
+            Ok(("abc".into(), "  def"))
+        );
+        assert_eq!(
+            outline_item(&space)("  abc\n  def"),
+            Ok(("abc".into(), "  def"))
+        );
     }
 }
