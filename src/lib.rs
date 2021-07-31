@@ -17,3 +17,5 @@ pub use ser::to_string;
 
 #[cfg(test)]
 mod tests;
+
+mod util;

@@ -1,9 +1,8 @@
 use crate::{from_str, outline, to_string};
 use pretty_assertions::assert_eq;
 use serde_derive::{Deserialize, Serialize};
-use std::collections::BTreeMap;
-use std::fmt;
-use std::iter::FromIterator;
+use std::{collections::BTreeMap, fmt, iter::FromIterator};
+use test_env_log::test;
 
 type Outline = outline::Outline<Option<String>>;
 

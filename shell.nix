@@ -1,7 +1,7 @@
 let
   pkgs = import <nixpkgs> {};
 
-  log_level = "info";
+  log_level = "debug";
 in
 pkgs.mkShell {
   buildInputs = with pkgs; [
