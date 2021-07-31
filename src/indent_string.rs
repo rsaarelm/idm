@@ -4,6 +4,9 @@ use crate::parse::{self, Result};
 ///
 /// An IDM file can be indented with either tabs or spaces, but a file must
 /// either use tabs only or spaces only.
+///
+/// An `IndentString` derefs to a `Vec` of its indent segments, with the value
+/// of a segment being the character length of that segment substring.
 #[derive(Clone, Eq, PartialEq, Debug)]
 pub enum IndentString {
     /// The state at start, we don't know which it is.
@@ -51,8 +54,17 @@ impl IndentString {
         Tabs(vec![1; depth])
     }
 
+    /// Return then character length (not segment count) of this indent string.
     pub fn str_len(&self) -> usize {
         self.iter().sum()
+    }
+
+    pub fn pop(&mut self) -> Option<usize> {
+        match self {
+            Undetermined => None,
+            Spaces(v) => v.pop(),
+            Tabs(v) => v.pop(),
+        }
     }
 
     fn reset(&mut self, seq: Vec<usize>) {
@@ -75,11 +87,16 @@ impl IndentString {
         }
     }
 
-    /// Construct a string of given depth using the character of this indent
-    /// style.
+    /// Construct a string of given character length using the character of
+    /// this indent style.
     ///
-    /// Will panic if the indent string is undetermined.
+    /// Will panic if the indent string is undetermined and requested depth is
+    /// not zero.
     pub fn string(&self, n: usize) -> String {
+        if n == 0 {
+            return "".into();
+        }
+
         match self {
             Undetermined => {
                 panic!("IndentString:string: Cannot generate Undetermined")
@@ -120,40 +137,43 @@ impl IndentString {
     /// indent must not use tabs when space indentation has already been
     /// established, or vice versa.
     ///
-    /// Will return an error if the line is blank (no well-defined indentation
-    /// level) or if it has indentation inconsistent with the existing one. If
-    /// the line is known to be non-blank, an error from `match_next`
-    /// indicates inconsistent indentation and means that the entire input is
-    /// unparseable.
+    /// Will skip over blank lines until it finds a non-blank one. Will return
+    /// a zero indent if there are no contentful lines left.
+    ///
+    /// An error from `match_next` indicates inconsistent indentation and
+    /// means that the entire input is unparseable.
     pub fn match_next<'a>(&self, input: &'a str) -> Result<'a, IndentString> {
         // Function used to match indentations. Will get locked to spaces or
         // tabs.
         let indent_fn;
         let mut ret;
 
+        // Eat blanks.
+        let mut pos = input;
+        while parse::r(&mut pos, parse::blank_line).is_ok() {}
+
         // Set type of indentation used or exit early.
-        match input.chars().next() {
-            None => return Err(input),
+        match pos.chars().next() {
+            None => return Ok((self.empty(), "")),
             Some(ws) if ws == ' ' || ws == '\t' => {
                 if !self.accepts(ws) {
                     // It's whitespace but not accepted by current state, must
                     // be trying to switch between tabs and spaces mid-input.
-                    return Err(input);
+                    return Err(pos);
                 }
                 indent_fn = move |n, input| repeat(ws, n, input);
                 ret = IndentString::accepting(ws);
             }
             Some(ws) if ws.is_whitespace() => {
                 // Unknown type of whitespace, or newline, not acceptable.
-                return Err(input);
+                return Err(pos);
             }
             Some(_) => {
                 // Not whitespace, return an empty indent string.
-                return Ok((self.empty(), input));
+                return Ok((self.empty(), pos));
             }
         }
 
-        let mut pos = input;
         for &segment_len in self.iter() {
             // Each segment must be matched in full or indentation is
             // inconsistent.
@@ -229,10 +249,11 @@ mod tests {
         assert_eq!(prev.match_next("   x"), Ok((Spaces(vec![3]), "x")));
         assert_eq!(prev.match_next("\tx"), Ok((Tabs(vec![1]), "x")));
         assert_eq!(prev.match_next("x"), Ok((Undetermined, "x")));
-        assert_eq!(prev.match_next("  "), Err("  "));
-        assert_eq!(prev.match_next(""), Err(""));
+        assert_eq!(prev.match_next("  "), Ok((Undetermined, "")));
+        assert_eq!(prev.match_next("\n  x"), Ok((Spaces(vec![2]), "x")));
+        assert_eq!(prev.match_next("\n  x\ny"), Ok((Spaces(vec![2]), "x\ny")));
+        assert_eq!(prev.match_next(""), Ok((Undetermined, "")));
         assert_eq!(prev.match_next("\t bad"), Err("\t bad"));
-        assert_eq!(prev.match_next("\n  a"), Err("\n  a"));
     }
 
     #[test]
@@ -244,12 +265,12 @@ mod tests {
         assert_eq!(prev.match_next("    x"), Ok((Spaces(vec![2, 2]), "x")));
         assert_eq!(prev.match_next("   x"), Ok((Spaces(vec![2, 1]), "x")));
         // Blank line
-        assert_eq!(prev.match_next("    "), Err("    "));
+        assert_eq!(prev.match_next("    "), Ok((Spaces(vec![]), "")));
         // Inconsistent with unbroken two space prefix.
         assert_eq!(prev.match_next(" x"), Err(" x"));
         // Mixed indentation.
         assert_eq!(prev.match_next("  \tx"), Err("\tx"));
-        assert_eq!(prev.match_next("  \n  a"), Err("\n  a"));
+        assert_eq!(prev.match_next("  \n  a"), Ok((Spaces(vec![2]), "a")));
     }
 
     #[test]
@@ -261,7 +282,7 @@ mod tests {
         assert_eq!(prev.match_next("\t\tx"), Ok((Tabs(vec![1, 1]), "x")));
         assert_eq!(prev.match_next("\t\t\tx"), Ok((Tabs(vec![1, 2]), "x")));
         // Blank line
-        assert_eq!(prev.match_next("    "), Err("    "));
+        assert_eq!(prev.match_next("    "), Ok((Tabs(vec![]), "")));
         // Mixed indentation.
         assert_eq!(prev.match_next("\t  x"), Err("  x"));
 
