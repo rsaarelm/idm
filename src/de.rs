@@ -194,8 +194,6 @@ impl<'a, 'de> de::Deserializer<'de> for &'a mut Deserializer<'de> {
     where
         V: de::Visitor<'de>,
     {
-        self.save(); // Return to checkpoint on Option head.
-
         // NB: Merging is only supported for variable-length seqs, not tuples.
         // It would mess up tuple/fixed-width-array matrices otherwise.
         // It's sort of an iffy feature overall, but is needed to make
@@ -216,7 +214,11 @@ impl<'a, 'de> de::Deserializer<'de> for &'a mut Deserializer<'de> {
     where
         V: de::Visitor<'de>,
     {
-        self.save(); // Return to checkpoint on Option head.
+        // Tuples (but not seqs) can have special behavior when the head value
+        // is Option. Save a checkpoint here so that it can be returned to
+        // when Option is encountered and the plans made in between are
+        // scrapped.
+        self.save();
         self.cursor.start_tuple(len)?;
         visitor.visit_seq(Sequence::new(self).tuple_length(len))
     }
@@ -421,17 +423,13 @@ impl<'a, 'de> de::MapAccess<'de> for Sequence<'a, 'de> {
     where
         K: de::DeserializeSeed<'de>,
     {
-        if self.contents_mode
-            || !self
-                .de
-                .cursor
-                .has_headline_content(self.de.cursor.current_depth)
-        {
+        if self.contents_mode || !self.de.cursor.has_next_token() {
+            log::debug!("next_key_seed: Out of items");
             return Ok(None);
         }
 
         if self.is_struct {
-            self.de.cursor.mode = ParsingMode::Key(false);
+            self.de.cursor.mode = ParsingMode::Key;
             if self.de.cursor.clone().key().is_err() {
                 // Must have _contents field present for the next bit to work.
                 //
@@ -445,7 +443,7 @@ impl<'a, 'de> de::MapAccess<'de> for Sequence<'a, 'de> {
 
                 // There's still content, but no valid key. Do the magic bit
                 // and conjure up a '_contents' key for the remaining content.
-                self.de.cursor.mode = ParsingMode::Key(true);
+                self.de.cursor.mode = ParsingMode::DummyKey;
                 // Also mess with depth so it looks like this is a whole new
                 // section with an empty headline, the whole remaining body
                 // needs to end up in the _contents part.
@@ -470,11 +468,11 @@ impl<'a, 'de> de::MapAccess<'de> for Sequence<'a, 'de> {
             if self.de.cursor.is_section(self.de.cursor.current_depth) {
                 // Has both headline and body.
                 // Assume full headline is key, body is content.
-                self.de.cursor.start_line();
+                self.de.cursor.start_line()?;
             } else {
                 // Has no body. Assume first headline word is key, rest of
                 // headline is value.
-                self.de.cursor.start_words();
+                self.de.cursor.start_words()?;
             }
         }
 

@@ -23,17 +23,18 @@ pub enum ParsingMode {
     ///
     /// The colon is removed and the symbol is changed from kebab-case to
     /// camel_case when parsing.
-    ///
-    /// If the magic flag is set, emit '_contents' instead of parsing
-    /// anything.
-    Key(bool),
+    Key,
+
+    /// Like Key, but instead of parsing anything, emit the '_contents' dummy
+    /// key.
+    DummyKey,
 }
 
 impl ParsingMode {
     pub fn is_inline(self) -> bool {
         use ParsingMode::*;
         match self {
-            Words | Key(_) => true,
+            Words | Key | DummyKey => true,
             _ => false,
         }
     }
@@ -117,9 +118,10 @@ impl<'a> Cursor<'a> {
     /// If it's already parsing an inline sequence, it can't.
     pub fn can_start_seq(&self) -> bool {
         match self.mode {
-            ParsingMode::Line | ParsingMode::Words | ParsingMode::Key(_) => {
-                false
-            }
+            ParsingMode::Line
+            | ParsingMode::Words
+            | ParsingMode::Key
+            | ParsingMode::DummyKey => false,
             _ => true,
         }
     }
@@ -275,16 +277,18 @@ impl<'a> Cursor<'a> {
                 log::debug!("Cursor::next_token parsed word {:?}", word);
                 Ok(word)
             }
-            Key(emit_dummy_key) => {
-                let key = if emit_dummy_key {
-                    "_contents".into()
-                } else {
-                    self.parse(parse::key, "Failed to read key")?
-                };
+            Key => {
+                let key = self.parse(parse::key, "Failed to read key")?;
                 // Keys are always a one-shot parse.
                 self.mode = Block;
                 log::debug!("Cursor::next_token parsed key: {:?}", key);
                 Ok(Cow::from(key))
+            }
+
+            DummyKey => {
+                self.mode = Block;
+                log::debug!("Cursor::next_token emitted dummy key");
+                Ok(Cow::from("_contents"))
             }
         }
     }
@@ -381,6 +385,14 @@ impl<'a> Cursor<'a> {
         // XXX: Can be suboptimal if there are big multiline atoms, but at
         // least it's dead simple.
         return self.clone().next_token().is_ok();
+    }
+
+    /// Read attribute key from input.
+    ///
+    /// Attribute keys must end in colon. They are converted from kebab-caes
+    /// to camel_case. So "foo-bar:" becomes "foo_bar".
+    pub fn key(&mut self) -> Result<String> {
+        self.parse(parse::key, "Expected key")
     }
 }
 
@@ -632,19 +644,6 @@ impl<'a> Cursor<'a> {
         } else {
             err!("verbatim_line: EOF")
         }
-    }
-
-    /// Read attribute key from input.
-    ///
-    /// Attribute keys must end in colon. They are converted from kebab-caes
-    /// to camel_case. So "foo-bar:" becomes "foo_bar".
-    #[deprecated]
-    pub fn key(&mut self) -> Result<String> {
-        let mut cursor = self.clone();
-        cursor.skip_indentation();
-        let key = cursor.parse(parse::key, "Expected key")?;
-        *self = cursor;
-        Ok(key)
     }
 
     /// Read the rest of the current line.

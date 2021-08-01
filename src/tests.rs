@@ -310,7 +310,7 @@ foo",
     );
 }
 
-//#[test]
+#[test]
 fn test_struct() {
     #[derive(Clone, Eq, PartialEq, Default, Debug, Serialize, Deserialize)]
     struct Simple {
