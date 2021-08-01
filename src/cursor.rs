@@ -17,7 +17,7 @@ pub enum ParsingMode {
     /// indented lines after this.
     Line,
     /// Single whitespace-separated token. Do not move to next line.
-    Word,
+    Words,
     /// Single whitespace-separated token, must have form "key-name:" (valid
     /// identifier, ends in colon).
     ///
@@ -33,7 +33,7 @@ impl ParsingMode {
     pub fn is_inline(self) -> bool {
         use ParsingMode::*;
         match self {
-            Word | Key(_) => true,
+            Words | Key(_) => true,
             _ => false,
         }
     }
@@ -117,7 +117,7 @@ impl<'a> Cursor<'a> {
     /// If it's already parsing an inline sequence, it can't.
     pub fn can_start_seq(&self) -> bool {
         match self.mode {
-            ParsingMode::Line | ParsingMode::Word | ParsingMode::Key(_) => {
+            ParsingMode::Line | ParsingMode::Words | ParsingMode::Key(_) => {
                 false
             }
             _ => true,
@@ -134,11 +134,10 @@ impl<'a> Cursor<'a> {
         match self.classify()? {
             BodyLine => {
                 log::debug!("Cursor::start_seq starting inline");
-                self.mode = ParsingMode::Word;
+                self.start_words()?;
             }
             Block => {
                 log::debug!("Cursor::start_seq starting outline");
-                self.mode = ParsingMode::Block;
                 self.start_block()?;
             }
             Section => {
@@ -162,16 +161,15 @@ impl<'a> Cursor<'a> {
         match self.classify()? {
             BodyLine => {
                 log::debug!("Cursor::start_tuple starting inline");
-                self.mode = ParsingMode::Word;
+                self.start_words()?;
             }
             Block => {
                 log::debug!("Cursor::start_tuple starting outline");
-                self.mode = ParsingMode::Block;
                 self.start_block()?;
             }
             Section => {
                 log::debug!("Cursor::start_tuple starting section");
-                self.mode = ParsingMode::Line;
+                self.start_line()?;
             }
         }
 
@@ -266,25 +264,27 @@ impl<'a> Cursor<'a> {
                 Ok(Cow::from(block))
             }
             Line => {
-                let line = Cow::from(self.line()?);
+                let line =
+                    Cow::from(self.parse(parse::line, "Failed to read line")?);
                 log::debug!("Cursor::next_token parsed line {:?}", line);
                 Ok(line)
             }
-            Word => {
-                let word = Cow::from(self.word()?);
+            Words => {
+                let word =
+                    Cow::from(self.parse(parse::word, "Failed to read word")?);
                 log::debug!("Cursor::next_token parsed word {:?}", word);
                 Ok(word)
             }
             Key(emit_dummy_key) => {
                 let key = if emit_dummy_key {
-                    Ok("_contents".into())
+                    "_contents".into()
                 } else {
-                    self.key()
+                    self.parse(parse::key, "Failed to read key")?
                 };
                 // Keys are always a one-shot parse.
                 self.mode = Block;
                 log::debug!("Cursor::next_token parsed key: {:?}", key);
-                Ok(Cow::from(key?))
+                Ok(Cow::from(key))
             }
         }
     }
@@ -308,6 +308,29 @@ impl<'a> Cursor<'a> {
 
         self.start_file();
         self.current_indent = new_indent;
+        self.mode = ParsingMode::Block;
+        Ok(())
+    }
+
+    pub fn start_line(&mut self) -> Result<()> {
+        log::debug!("Cursor::start_line at {:?}", Trunc(self.input));
+        let indent = self.current_indent.clone();
+        self.parse(
+            |input| indent.match_same(input),
+            "start_line: Invalid indent",
+        )?;
+        self.mode = ParsingMode::Line;
+        Ok(())
+    }
+
+    pub fn start_words(&mut self) -> Result<()> {
+        log::debug!("Cursor::start_words at {:?}", Trunc(self.input));
+        let indent = self.current_indent.clone();
+        self.parse(
+            |input| indent.match_same(input),
+            "start_words: Invalid indent",
+        )?;
+        self.mode = ParsingMode::Words;
         Ok(())
     }
 
@@ -349,6 +372,7 @@ impl<'a> Cursor<'a> {
         if !line.chars().all(|c| c.is_whitespace()) {
             err!("end_line: Unparsed content left in line")
         } else {
+            self.mode = ParsingMode::Block;
             Ok(())
         }
     }
@@ -610,21 +634,11 @@ impl<'a> Cursor<'a> {
         }
     }
 
-    /// Read next whitespace-separated word from current line.
-    fn word(&mut self) -> Result<&str> {
-        // Try it out in a clone so we don't change state if no words are
-        // found.
-        let mut cursor = self.clone();
-        cursor.skip_indentation();
-        let word = cursor.parse(parse::word, "Expected word")?;
-        *self = cursor;
-        Ok(word)
-    }
-
     /// Read attribute key from input.
     ///
     /// Attribute keys must end in colon. They are converted from kebab-caes
     /// to camel_case. So "foo-bar:" becomes "foo_bar".
+    #[deprecated]
     pub fn key(&mut self) -> Result<String> {
         let mut cursor = self.clone();
         cursor.skip_indentation();

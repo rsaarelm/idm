@@ -137,7 +137,7 @@ impl<'a, 'de> de::Deserializer<'de> for &'a mut Deserializer<'de> {
 
             // Roll back from entering a body
             self.restore();
-            self.cursor.mode = ParsingMode::Line;
+            self.cursor.start_line()?;
         } else if self.cursor.mode.is_inline() {
             // We can't parse a None value in inline mode because there's no
             // notation for a missing inline entry.
@@ -365,43 +365,17 @@ impl<'a, 'de> de::SeqAccess<'de> for Sequence<'a, 'de> {
             // there's no next token. So always try to deserialize at tuple
             // start.
 
-            log::debug!("next_element_seed: deserializing element");
+            log::debug!(
+                "next_element_seed: deserializing element {}",
+                self.idx
+            );
             let ret = seed.deserialize(&mut *self.de).map(Some);
 
             // Only ever parse the first item in Line mode, dive in and start
             // doing block from then on.
             if let ParsingMode::Line = self.de.cursor.mode {
                 log::debug!("next_element_seed: leaving Line mode");
-                self.de.cursor.mode = ParsingMode::Block;
-
                 self.de.cursor.start_block()?;
-                /*
-                if self.de.cursor.at_empty_line() {
-                    // Start body would consume an empty line as headline.
-                    // Make it the contents of the next step instead.
-                    self.de.cursor.current_depth += 1;
-                } else if self
-                    .de
-                    .cursor
-                    .clone()
-                    .verbatim_line(self.de.cursor.current_depth)
-                    == Ok("--")
-                {
-                    // Start body would also consume the empty headline
-                    // marker, so another early exit condition here.
-                    // XXX: This is another bit of ugly special cases...
-                    self.de.cursor.current_depth += 1;
-                } else if let Err(_) = self.de.cursor.start_block() {
-                    // We were forced here because of being in a tuple, but
-                    // there's no actual body left, the tuple element will be
-                    // empty. Skip trying to enter the body and just increment
-                    // the depth.
-                    //
-                    // XXX: This relies in start_block not performing mutations
-                    // if it fails.
-                    self.de.cursor.current_depth += 1;
-                }
-                */
             }
 
             self.idx += 1;
@@ -419,7 +393,6 @@ impl<'a, 'de> de::SeqAccess<'de> for Sequence<'a, 'de> {
                             self.de.cursor.end_block()?;
                         }
                     }
-                    self.de.cursor.mode = ParsingMode::Block;
                     self.de.cursor.seq_pos = None;
                 }
             }
@@ -435,7 +408,6 @@ impl<'a, 'de> de::SeqAccess<'de> for Sequence<'a, 'de> {
                     self.de.cursor.end_block()?;
                 }
             }
-            self.de.cursor.mode = ParsingMode::Block;
             self.de.cursor.seq_pos = None;
             Ok(None)
         }
@@ -498,18 +470,18 @@ impl<'a, 'de> de::MapAccess<'de> for Sequence<'a, 'de> {
             if self.de.cursor.is_section(self.de.cursor.current_depth) {
                 // Has both headline and body.
                 // Assume full headline is key, body is content.
-                self.de.cursor.mode = ParsingMode::Line;
+                self.de.cursor.start_line();
             } else {
                 // Has no body. Assume first headline word is key, rest of
                 // headline is value.
-                self.de.cursor.mode = ParsingMode::Word;
+                self.de.cursor.start_words();
             }
         }
 
         let ret = seed.deserialize(&mut *self.de).map(Some);
         // If we're in word mode, drop out of it, first headline item was
         // parsed as key, but the entire rest of the line needs to be value.
-        if self.de.cursor.mode == ParsingMode::Word {
+        if self.de.cursor.mode == ParsingMode::Words {
             self.de.cursor.mode = ParsingMode::Block;
         }
         ret
