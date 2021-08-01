@@ -101,7 +101,7 @@ impl<'a> Cursor<'a> {
             line_start: s,
             input: s,
 
-            current_indent: Default::default(),
+            current_indent: IndentString::default(),
             line_number: 0,
             mode: ParsingMode::Block,
             // Start at the head of a dummy section encompassing the whole
@@ -242,9 +242,9 @@ impl<'a> Cursor<'a> {
             return err!("next_token: No input left");
         }
 
-        if self.before_file_start() {
+        if self.at_negative_column() {
             log::debug!(
-                "Cursor::next_token at file start, consuming entire content"
+                "Cursor::next_token run while at column -1, consuming entire content"
             );
             let ret = Cow::from(self.input.trim_end());
             self.consume_to("");
@@ -302,8 +302,9 @@ impl<'a> Cursor<'a> {
             .match_next(self.input)
             .map_err(self.err("start_block: Bad indentation"))?;
 
-        if !self.before_file_start()
-            && !(new_indent.len() > self.current_indent.len())
+        println!("\x1b[1;32mcurrent: {:?} new: {:?}\x1b[0m", self.current_indent, new_indent);
+
+        if !(new_indent.len() > self.current_indent.len())
         {
             return err!(
                 "start_block: Body does not introduce deeper indentation"
@@ -345,8 +346,6 @@ impl<'a> Cursor<'a> {
             // Can exit until back at "-1 indent" at end.
             if !self.current_indent.is_empty() {
                 self.current_indent.pop();
-            } else if !self.after_file_end() {
-                self.line_number = -1;
             } else {
                 return err!("end_block: Exit not matched by indentation");
             }
@@ -459,14 +458,14 @@ impl<'a> Cursor<'a> {
         }
     }
 
+    fn at_negative_column(&self) -> bool {
+        self.current_indent.is_empty()
+    }
+
     /// Return true if parsing the file hasn't started yet and special parsing
     /// rules may be in effect.
     fn before_file_start(&self) -> bool {
         self.line_number == 0
-    }
-
-    fn after_file_end(&self) -> bool {
-        self.line_number == -1
     }
 
     /// Mark the file parse as started, `before_file_start` rules will no
@@ -512,7 +511,7 @@ impl<'a> Cursor<'a> {
     }
 
     fn classify(&self) -> Result<Shape> {
-        if self.before_file_start() {
+        if self.at_negative_column() {
             return Ok(Block);
         }
 

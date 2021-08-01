@@ -434,21 +434,21 @@ mod tests {
     #[test]
     fn test_indented_body() {
         let empty = IndentString::default();
-        let space_1 = IndentString::new(1);
-        let space_2 = IndentString::new(2);
+        let space_1 = IndentString::spaces(&[1]);
+        let space_2 = IndentString::spaces(&[1, 1]);
         assert_eq!(indented_body(&empty, ""), Err(""));
         assert_eq!(indented_body(&empty, "a"), Err("a"));
         assert_eq!(indented_body(&empty, "a\n b"), Err("a\n b"));
         assert_eq!(indented_body(&empty, " a\n b"), Ok(("a\nb".into(), "")));
         assert_eq!(indented_body(&empty, "  a\n b"), Ok((" a\nb".into(), "")));
 
-        assert_eq!(indented_body(&space_1, "   a\n b"), Ok(("a".into(), " b")));
+        assert_eq!(indented_body(&space_1, "  a\n b"), Ok(("a".into(), " b")));
         assert_eq!(
-            indented_body(&space_1, "   a\n   b\n c"),
+            indented_body(&space_1, "  a\n  b\n c"),
             Ok(("a\nb".into(), " c"))
         );
         assert_eq!(
-            indented_body(&space_1, "   a\n   \t \n  b\n c"),
+            indented_body(&space_1, "  a\n   \t \n  b\n c"),
             Ok(("a\n\nb".into(), " c"))
         );
         assert_eq!(indented_body(&space_1, "  a\n \tb\n c"), Err("\tb\n c"));
@@ -613,7 +613,7 @@ abc"
         );
 
         // Using preset indentation level
-        let space = IndentString::new(1);
+        let space = IndentString::spaces(&[2]);
 
         assert_eq!(
             non_content(&space)(
@@ -665,7 +665,7 @@ abc"
             Ok(("abc\ndef".into(), ""))
         );
 
-        let space = IndentString::new(1);
+        let space = IndentString::spaces(&[1]);
         assert_eq!(outline_item(&space)("abc"), Err("abc"));
         assert_eq!(outline_item(&space)("  abc"), Ok(("abc".into(), "")));
         assert_eq!(outline_item(&space)("    abc"), Ok(("abc".into(), "")));

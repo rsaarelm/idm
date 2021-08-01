@@ -31,28 +31,31 @@ impl<'a> std::ops::Deref for IndentString {
 }
 
 impl IndentString {
-    /// Generate a default indentation string for the given depth.
-    ///
-    /// Default style is two spaces per indent level.
-    pub fn new(depth: usize) -> IndentString {
-        let mut segments = vec![2; depth + 1];
-        segments[0] = 0;
+    fn build(indent_char: char, segments: &[usize]) -> IndentString {
+        let input = segments;
+        // Constructor functions won't produce column -1 indent strings.
+        // Add the initial zero to mark this.
+        let mut segments = vec![0];
+
+        for &i in input {
+            if i == 0 {
+                panic!("IndentString::spaces 0 segment length");
+            }
+            segments.push(i);
+        }
 
         IndentString {
-            indent_char: ' ',
-            segments,
+            indent_char,
+            segments
         }
     }
 
-    /// Generate indentation string with single tabs as indents.
-    pub fn tabs(depth: usize) -> IndentString {
-        let mut segments = vec![1; depth + 1];
-        segments[0] = 0;
+    pub fn spaces(segments: &[usize]) -> IndentString {
+        IndentString::build(' ', segments)
+    }
 
-        IndentString {
-            indent_char: '\t',
-            segments,
-        }
+    pub fn tabs(segments: &[usize]) -> IndentString {
+        IndentString::build('\t', segments)
     }
 
     /// Return the character length (not segment count) of this indent string.
@@ -122,33 +125,11 @@ impl IndentString {
         // Function used to match indentations. Will get locked to spaces or
         // tabs.
         let indent_fn;
-        let mut ret;
+        let mut ret = self.empty();
 
         // Eat blanks.
         let mut pos = input;
         while parse::r(&mut pos, parse::blank_line).is_ok() {}
-
-        // Set type of indentation used or exit early.
-        match pos.chars().next() {
-            None => return Ok((self.empty(), "")),
-            Some(ws) if ws == ' ' || ws == '\t' => {
-                if !self.accepts(ws) {
-                    // It's whitespace but not accepted by current state, must
-                    // be trying to switch between tabs and spaces mid-input.
-                    return Err(pos);
-                }
-                indent_fn = move |n, input| repeat(ws, n, input);
-                ret = IndentString::default().set_char(ws);
-            }
-            Some(ws) if ws.is_whitespace() => {
-                // Unknown type of whitespace, or newline, not acceptable.
-                return Err(pos);
-            }
-            Some(_) => {
-                // Not whitespace, return an empty indent string.
-                return Ok((self.empty(), pos));
-            }
-        }
 
         // Special case for column -1
         if self.is_empty() {
@@ -162,6 +143,27 @@ impl IndentString {
 
             // Exit early.
             return Ok((ret, pos));
+        }
+
+        // Set type of indentation used or exit early.
+        match pos.chars().next() {
+            None => return Ok((self.empty(), "")),
+            Some(ws) if ws == ' ' || ws == '\t' => {
+                if !ret.accepts(ws) {
+                    // It's whitespace but not accepted by current state, must
+                    // be trying to switch between tabs and spaces mid-input.
+                    return Err(pos);
+                }
+                indent_fn = move |n, input| repeat(ws, n, input);
+            }
+            Some(ws) if ws.is_whitespace() => {
+                // Unknown type of whitespace, or newline, not acceptable.
+                return Err(pos);
+            }
+            Some(_) => {
+                // Not whitespace, return an empty indent string.
+                return Ok((ret, pos));
+            }
         }
 
         for &segment_len in self.iter() {
@@ -228,17 +230,22 @@ fn repeat(ch: char, mut n: usize, input: &str) -> Result<&str> {
     Ok((&input[..pos], &input[pos..]))
 }
 
-/* FIXME this whole stuff to use the new version
-
 #[cfg(test)]
 mod tests {
-    use super::{IndentString, IndentString::*};
+    use super::*;
 
     #[test]
     fn test_undetermined() {
-        let prev = IndentString::default();
+        let start = IndentString::default();
 
-        assert_eq!(prev.match_next("   x"), Ok((Spaces(vec![3]), "x")));
+        // Get to column 0, stay undetermined.
+        assert!(start.match_next("x").is_ok());
+        let prev = start.match_next("x").unwrap().0;
+        assert_eq!(prev.indent_char, '\0');
+        assert_eq!(prev.iter().cloned().collect::<Vec<usize>>(), vec![0]);
+
+        assert_eq!(prev.match_next("   x"), Ok((IndentString::spaces(&[3]), "x")));
+        /*
         assert_eq!(prev.match_next("\tx"), Ok((Tabs(vec![1]), "x")));
         assert_eq!(prev.match_next("x"), Ok((Undetermined, "x")));
         assert_eq!(prev.match_next("  "), Ok((Undetermined, "")));
@@ -246,10 +253,12 @@ mod tests {
         assert_eq!(prev.match_next("\n  x\ny"), Ok((Spaces(vec![2]), "x\ny")));
         assert_eq!(prev.match_next(""), Ok((Undetermined, "")));
         assert_eq!(prev.match_next("\t bad"), Err("\t bad"));
+        */
     }
 
     #[test]
     fn test_spaces() {
+        /*
         let prev = IndentString::new(1);
 
         assert_eq!(prev.match_next("x"), Ok((Spaces(vec![]), "x")));
@@ -263,10 +272,12 @@ mod tests {
         // Mixed indentation.
         assert_eq!(prev.match_next("  \tx"), Err("\tx"));
         assert_eq!(prev.match_next("  \n  a"), Ok((Spaces(vec![2]), "a")));
+        */
     }
 
     #[test]
     fn test_tabs() {
+        /*
         let prev = IndentString::tabs(1);
 
         assert_eq!(prev.match_next("x"), Ok((Tabs(vec![]), "x")));
@@ -279,7 +290,6 @@ mod tests {
         assert_eq!(prev.match_next("\t  x"), Err("  x"));
 
         assert_eq!(Tabs(vec![2]).match_next("\tx"), Err("\tx"));
+        */
     }
 }
-
-*/
