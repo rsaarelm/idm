@@ -433,7 +433,7 @@ mod tests {
 
     #[test]
     fn test_indented_body() {
-        let empty = IndentString::default();
+        let empty = IndentString::undetermined();
         let space_1 = IndentString::spaces(&[1]);
         let space_2 = IndentString::spaces(&[1, 1]);
         assert_eq!(indented_body(&empty, ""), Err(""));
@@ -523,7 +523,7 @@ mod tests {
 
     #[test]
     fn test_section() {
-        let empty = IndentString::default();
+        let empty = IndentString::undetermined();
 
         assert_eq!(
             section(&empty, "bar\n  baz"),
@@ -533,7 +533,7 @@ mod tests {
 
     #[test]
     fn test_non_content() {
-        let empty = IndentString::default();
+        let empty = IndentString::undetermined();
 
         assert_eq!(non_content(&empty)(""), Ok(((), "")));
         assert_eq!(non_content(&empty)("abc"), Ok(((), "abc")));
@@ -655,7 +655,7 @@ abc"
 
     #[test]
     fn test_outline_item() {
-        let empty = IndentString::default();
+        let empty = IndentString::undetermined();
 
         assert_eq!(outline_item(&empty)("abc"), Ok(("abc".into(), "")));
         assert_eq!(outline_item(&empty)("abc\ndef"), Ok(("abc".into(), "def")));

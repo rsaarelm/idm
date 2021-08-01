@@ -50,12 +50,26 @@ impl IndentString {
         }
     }
 
+    /// Build space indented `IndentString` with given segments.
     pub fn spaces(segments: &[usize]) -> IndentString {
         IndentString::build(' ', segments)
     }
 
+    /// Build tab indented `IndentString` with given segments.
     pub fn tabs(segments: &[usize]) -> IndentString {
         IndentString::build('\t', segments)
+    }
+
+    /// Build undetermined `IndentString` with segments `&[]`.
+    ///
+    /// This is the only segment list allowed for an undetermined indent type
+    /// `IndentString`. It is still distinct from the default undetermined
+    /// `IndentString` since it's at column 0, not column -1 like the default.
+    pub fn undetermined() -> IndentString {
+        IndentString {
+            segments: vec![0],
+            indent_char: '\0',
+        }
     }
 
     /// Return the character length (not segment count) of this indent string.
@@ -65,17 +79,6 @@ impl IndentString {
 
     pub fn pop(&mut self) -> Option<usize> {
         self.segments.pop()
-    }
-
-    fn set_char(mut self, c: char) -> IndentString {
-        if self.indent_char != '\0' && c != self.indent_char {
-            panic!("set_char: Changing established indentation");
-        }
-        if c != ' ' && c != '\t' {
-            panic!("set_char: Invalid indent char {:?}", c);
-        }
-        self.indent_char = c;
-        self
     }
 
     /// Construct a string of given character length using the character of
@@ -102,9 +105,9 @@ impl IndentString {
         }
     }
 
-    fn empty(&self) -> IndentString {
+    fn zero_column(&self) -> IndentString {
         IndentString {
-            segments: Vec::new(),
+            segments: vec![0],
             indent_char: self.indent_char,
         }
     }
@@ -125,7 +128,7 @@ impl IndentString {
         // Function used to match indentations. Will get locked to spaces or
         // tabs.
         let indent_fn;
-        let mut ret = self.empty();
+        let mut ret = self.zero_column();
 
         // Eat blanks.
         let mut pos = input;
@@ -138,22 +141,20 @@ impl IndentString {
                 return Err(pos);
             }
 
-            // Push the special zero element to mark being out of column -1.
-            ret.segments.push(0);
-
             // Exit early.
             return Ok((ret, pos));
         }
 
         // Set type of indentation used or exit early.
         match pos.chars().next() {
-            None => return Ok((self.empty(), "")),
+            None => return Ok((self.zero_column(), "")),
             Some(ws) if ws == ' ' || ws == '\t' => {
                 if !ret.accepts(ws) {
                     // It's whitespace but not accepted by current state, must
                     // be trying to switch between tabs and spaces mid-input.
                     return Err(pos);
                 }
+                ret.indent_char = ws;
                 indent_fn = move |n, input| repeat(ws, n, input);
             }
             Some(ws) if ws.is_whitespace() => {
@@ -166,9 +167,10 @@ impl IndentString {
             }
         }
 
-        for &segment_len in self.iter() {
+        for &segment_len in self.iter().skip(1) {
             // Each segment must be matched in full or indentation is
-            // inconsistent.
+            // inconsistent. (Skip the first segment which is always the
+            // zero-length marker for being past column -1.)
             parse::r(&mut pos, |input| indent_fn(segment_len, input))?;
             ret.segments.push(segment_len);
 
@@ -236,60 +238,48 @@ mod tests {
 
     #[test]
     fn test_undetermined() {
-        let start = IndentString::default();
-
-        // Get to column 0, stay undetermined.
-        assert!(start.match_next("x").is_ok());
-        let prev = start.match_next("x").unwrap().0;
-        assert_eq!(prev.indent_char, '\0');
-        assert_eq!(prev.iter().cloned().collect::<Vec<usize>>(), vec![0]);
+        let prev = IndentString::undetermined();
 
         assert_eq!(prev.match_next("   x"), Ok((IndentString::spaces(&[3]), "x")));
-        /*
-        assert_eq!(prev.match_next("\tx"), Ok((Tabs(vec![1]), "x")));
-        assert_eq!(prev.match_next("x"), Ok((Undetermined, "x")));
-        assert_eq!(prev.match_next("  "), Ok((Undetermined, "")));
-        assert_eq!(prev.match_next("\n  x"), Ok((Spaces(vec![2]), "x")));
-        assert_eq!(prev.match_next("\n  x\ny"), Ok((Spaces(vec![2]), "x\ny")));
-        assert_eq!(prev.match_next(""), Ok((Undetermined, "")));
+        assert_eq!(prev.match_next("\tx"), Ok((IndentString::tabs(&[1]), "x")));
+        assert_eq!(prev.match_next("x"), Ok((IndentString::undetermined(), "x")));
+        assert_eq!(prev.match_next("  "), Ok((IndentString::undetermined(), "")));
+        assert_eq!(prev.match_next("\n  x"), Ok((IndentString::spaces(&[2]), "x")));
+        assert_eq!(prev.match_next("\n  x\ny"), Ok((IndentString::spaces(&[2]), "x\ny")));
+        assert_eq!(prev.match_next(""), Ok((IndentString::undetermined(), "")));
         assert_eq!(prev.match_next("\t bad"), Err("\t bad"));
-        */
     }
 
     #[test]
     fn test_spaces() {
-        /*
-        let prev = IndentString::new(1);
+        let prev = IndentString::spaces(&[2]);
 
-        assert_eq!(prev.match_next("x"), Ok((Spaces(vec![]), "x")));
-        assert_eq!(prev.match_next("  x"), Ok((Spaces(vec![2]), "x")));
-        assert_eq!(prev.match_next("    x"), Ok((Spaces(vec![2, 2]), "x")));
-        assert_eq!(prev.match_next("   x"), Ok((Spaces(vec![2, 1]), "x")));
+        assert_eq!(prev.match_next("x"), Ok((IndentString::spaces(&[]), "x")));
+        assert_eq!(prev.match_next("  x"), Ok((IndentString::spaces(&[2]), "x")));
+        assert_eq!(prev.match_next("    x"), Ok((IndentString::spaces(&[2, 2]), "x")));
+        assert_eq!(prev.match_next("   x"), Ok((IndentString::spaces(&[2, 1]), "x")));
         // Blank line
-        assert_eq!(prev.match_next("    "), Ok((Spaces(vec![]), "")));
+        assert_eq!(prev.match_next("    "), Ok((IndentString::spaces(&[]), "")));
         // Inconsistent with unbroken two space prefix.
         assert_eq!(prev.match_next(" x"), Err(" x"));
         // Mixed indentation.
         assert_eq!(prev.match_next("  \tx"), Err("\tx"));
-        assert_eq!(prev.match_next("  \n  a"), Ok((Spaces(vec![2]), "a")));
-        */
+        assert_eq!(prev.match_next("  \n  a"), Ok((IndentString::spaces(&[2]), "a")));
     }
 
     #[test]
     fn test_tabs() {
-        /*
-        let prev = IndentString::tabs(1);
+        let prev = IndentString::tabs(&[1]);
 
-        assert_eq!(prev.match_next("x"), Ok((Tabs(vec![]), "x")));
-        assert_eq!(prev.match_next("\tx"), Ok((Tabs(vec![1]), "x")));
-        assert_eq!(prev.match_next("\t\tx"), Ok((Tabs(vec![1, 1]), "x")));
-        assert_eq!(prev.match_next("\t\t\tx"), Ok((Tabs(vec![1, 2]), "x")));
+        assert_eq!(prev.match_next("x"), Ok((IndentString::tabs(&[]), "x")));
+        assert_eq!(prev.match_next("\tx"), Ok((IndentString::tabs(&[1]), "x")));
+        assert_eq!(prev.match_next("\t\tx"), Ok((IndentString::tabs(&[1, 1]), "x")));
+        assert_eq!(prev.match_next("\t\t\tx"), Ok((IndentString::tabs(&[1, 2]), "x")));
         // Blank line
-        assert_eq!(prev.match_next("    "), Ok((Tabs(vec![]), "")));
+        assert_eq!(prev.match_next("    "), Ok((IndentString::tabs(&[]), "")));
         // Mixed indentation.
         assert_eq!(prev.match_next("\t  x"), Err("  x"));
 
-        assert_eq!(Tabs(vec![2]).match_next("\tx"), Err("\tx"));
-        */
+        assert_eq!(IndentString::tabs(&[2]).match_next("\tx"), Err("\tx"));
     }
 }
