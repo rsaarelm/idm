@@ -447,7 +447,7 @@ impl<'a, 'de> de::MapAccess<'de> for Sequence<'a, 'de> {
                 // Also mess with depth so it looks like this is a whole new
                 // section with an empty headline, the whole remaining body
                 // needs to end up in the _contents part.
-                self.de.cursor.current_depth -= 1;
+                self.de.cursor.prepare_for_contents()?;
                 self.contents_mode = true;
             }
 

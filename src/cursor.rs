@@ -366,6 +366,17 @@ impl<'a> Cursor<'a> {
         }
     }
 
+    /// Call when entering the dummy '_contents' region of a struct.
+    ///
+    /// The actual IDM content is just data at the level of the struct fields,
+    /// so this pops the indent level in preparation for parsing the contents
+    /// part as a block.
+    pub fn prepare_for_contents(&mut self) -> Result<()> {
+        log::debug!("Cursor::prepare_for_contents at {:?}", Trunc(self.input));
+        self.current_indent.pop();
+        Ok(())
+    }
+
     pub fn end_line(&mut self) -> Result<()> {
         if self.input == "" {
             return Ok(());
