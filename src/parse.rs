@@ -434,21 +434,21 @@ mod tests {
     #[test]
     fn test_indented_body() {
         let empty = IndentString::default();
-        let space_1 = IndentString::Spaces(vec![1]);
-        let space_2 = IndentString::Spaces(vec![1, 1]);
+        let space_1 = IndentString::new(1);
+        let space_2 = IndentString::new(2);
         assert_eq!(indented_body(&empty, ""), Err(""));
         assert_eq!(indented_body(&empty, "a"), Err("a"));
         assert_eq!(indented_body(&empty, "a\n b"), Err("a\n b"));
         assert_eq!(indented_body(&empty, " a\n b"), Ok(("a\nb".into(), "")));
         assert_eq!(indented_body(&empty, "  a\n b"), Ok((" a\nb".into(), "")));
 
-        assert_eq!(indented_body(&space_1, "  a\n b"), Ok(("a".into(), " b")));
+        assert_eq!(indented_body(&space_1, "   a\n b"), Ok(("a".into(), " b")));
         assert_eq!(
-            indented_body(&space_1, "  a\n  b\n c"),
+            indented_body(&space_1, "   a\n   b\n c"),
             Ok(("a\nb".into(), " c"))
         );
         assert_eq!(
-            indented_body(&space_1, "  a\n   \t \n  b\n c"),
+            indented_body(&space_1, "   a\n   \t \n  b\n c"),
             Ok(("a\n\nb".into(), " c"))
         );
         assert_eq!(indented_body(&space_1, "  a\n \tb\n c"), Err("\tb\n c"));
