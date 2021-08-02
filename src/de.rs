@@ -19,26 +19,16 @@ where
 pub struct Deserializer<'de> {
     cursor: Cursor<'de>,
     // Fallback position if we need to retry speculative parsing.
-    checkpoint: Cursor<'de>,
+    checkpoint: Checkpoint<'de>,
 }
 
 impl<'de> Deserializer<'de> {
     pub fn new(input: &'de str) -> Deserializer<'de> {
         let cursor = Cursor::new(input);
         Deserializer {
-            checkpoint: cursor.clone(),
+            checkpoint: Default::default(),
             cursor,
         }
-    }
-
-    /// Save current cursor position as checkpoint.
-    fn save(&mut self) {
-        self.checkpoint = self.cursor.clone();
-    }
-
-    /// Restore cursor position from checkpoint.
-    fn restore(&mut self) {
-        self.cursor = self.checkpoint.clone();
     }
 
     fn parse_next<T: FromStr>(&mut self) -> Result<T> {
@@ -131,12 +121,17 @@ impl<'a, 'de> de::Deserializer<'de> for &'a mut Deserializer<'de> {
         V: de::Visitor<'de>,
     {
         if self.cursor.seq_pos == Some(SequencePos::TupleStart) {
+            log::debug!("deserialize_option: Encountered option at tuple start, rewinding");
             // The hairy magic bit: If we're at the start of a tuple, force
             // line mode here. An empty headline will be read as the tuple
             // value instead of a signal to enter block mode.
+            //
+            // If the checkpoint logic looks sort of hairy and weird that's
+            // because it is.
 
             // Roll back from entering a body
-            self.restore();
+            self.checkpoint.restore(&mut self.cursor);
+
             self.cursor.start_line()?;
         } else if self.cursor.mode.is_inline() {
             // We can't parse a None value in inline mode because there's no
@@ -144,18 +139,19 @@ impl<'a, 'de> de::Deserializer<'de> for &'a mut Deserializer<'de> {
             return err!("deserialize_option: Not allowed in inline sequences");
         }
 
-        if self.cursor.has_next_token() || self.cursor.at_empty_line() {
-            visitor.visit_some(self)
-        } else {
-            // XXX: Ugly guarantee that empty-marker gets consumed.
-            if let ParsingMode::Line = self.cursor.mode {
-                if self.cursor.clone().verbatim_line(self.cursor.current_depth)
-                    == Ok("--")
-                {
-                    let _ = self.cursor.line();
-                }
-            }
+        if self
+            .cursor
+            .clone()
+            .next_token()
+            .map_or(false, |tok| tok == "--")
+        {
+            log::debug!("deserialize_option: is None");
+            // Consume it for real.
+            let _ = self.cursor.next_token();
             visitor.visit_none()
+        } else {
+            log::debug!("deserialize_option: is Some");
+            visitor.visit_some(self)
         }
     }
 
@@ -201,6 +197,7 @@ impl<'a, 'de> de::Deserializer<'de> for &'a mut Deserializer<'de> {
         if self.cursor.can_start_seq()
             && self.cursor.seq_pos == Some(SequencePos::TupleEnd)
         {
+            log::debug!("deserialize_seq: Merging sequence to tuple");
             // Skip entering body when doing merged sequence.
             self.cursor.seq_pos = None;
             return visitor.visit_seq(Sequence::new(self).merged());
@@ -214,11 +211,6 @@ impl<'a, 'de> de::Deserializer<'de> for &'a mut Deserializer<'de> {
     where
         V: de::Visitor<'de>,
     {
-        // Tuples (but not seqs) can have special behavior when the head value
-        // is Option. Save a checkpoint here so that it can be returned to
-        // when Option is encountered and the plans made in between are
-        // scrapped.
-        self.save();
         self.cursor.start_tuple(len)?;
         visitor.visit_seq(Sequence::new(self).tuple_length(len))
     }
@@ -359,9 +351,14 @@ impl<'a, 'de> de::SeqAccess<'de> for Sequence<'a, 'de> {
         };
 
         if elements_remain {
-            log::debug!("next_element_seed advancing seq");
+            log::debug!("next_element_seed: advancing seq");
+            // Checkpoint before consuming noncontent.
+            let old_cursor = self.de.cursor.clone();
+
             // Walk over noncontent
             self.de.cursor.seq_advance()?;
+
+            self.de.checkpoint.save(old_cursor, self.de.cursor.input());
 
             // If the first element of tuple is Option type, it may look like
             // there's no next token. So always try to deserialize at tuple
@@ -500,5 +497,52 @@ impl<'a, 'de> de::MapAccess<'de> for Sequence<'a, 'de> {
             self.de.cursor.end_block()?;
         }
         ret
+    }
+}
+
+/// Cursor checkpointing support structure
+///
+/// For handling the hacky bit where parsing may need to back down when
+/// encountering `Option` values.
+#[derive(Clone, Default)]
+struct Checkpoint<'a> {
+    /// Saved cursor and new input position at which checkpoint was saved.
+    span: Option<(Cursor<'a>, &'a str)>,
+}
+
+impl<'a> Checkpoint<'a> {
+    pub fn save(&mut self, old_cursor: Cursor<'a>, new_pos: &'a str) {
+        // Are we encoding an actual skip
+        let did_skip = new_pos != old_cursor.input();
+        let seen_position =
+            self.span.as_ref().map_or(false, |(_, pos)| *pos == new_pos);
+
+        // If a skip happened, the position should be something we haven't
+        // encountered.
+        debug_assert!(!did_skip || !seen_position);
+
+        if seen_position {
+            // We already stored a jump to this position, do not munge
+            // checkpoint with a no-length jump
+            log::debug!("Checkpoint::save: At known position, doing nothing");
+            return;
+        } else if did_skip {
+            log::debug!("Checkpoint::save: Saving cursor position");
+            self.span = Some((old_cursor, new_pos));
+        } else {
+            // Entered a new position, but there's no skip to back over,
+            // turn checkpoint into no-op.
+            log::debug!("Checkpoint::save: No skip, clearing checkpoint");
+            self.span = None;
+        }
+    }
+
+    pub fn restore(&mut self, cursor: &mut Cursor<'a>) {
+        if let Some((old_cursor, _)) = std::mem::replace(&mut self.span, None) {
+            log::debug!(
+                "Checkpoint::restore: Restoring earlier cursor position"
+            );
+            *cursor = old_cursor;
+        }
     }
 }

@@ -665,7 +665,7 @@ abc"
             Ok(("abc\ndef".into(), ""))
         );
 
-        let space = IndentString::spaces(&[1]);
+        let space = IndentString::spaces(&[2]);
         assert_eq!(outline_item(&space)("abc"), Err("abc"));
         assert_eq!(outline_item(&space)("  abc"), Ok(("abc".into(), "")));
         assert_eq!(outline_item(&space)("    abc"), Ok(("abc".into(), "")));

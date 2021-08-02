@@ -46,7 +46,7 @@ impl IndentString {
 
         IndentString {
             indent_char,
-            segments
+            segments,
         }
     }
 
@@ -110,6 +110,18 @@ impl IndentString {
             segments: vec![0],
             indent_char: self.indent_char,
         }
+    }
+
+    /// Create a fake deeper level indent, for situations where you'll pop
+    /// right out.
+    pub fn dummy_next_depth(&self) -> IndentString {
+        let mut ret = self.clone();
+        if ret.segments.is_empty() {
+            ret.segments.push(0);
+        } else {
+            ret.segments.push(1);
+        }
+        ret
     }
 
     /// Try to match indentations on next line given self as current indent
@@ -240,12 +252,27 @@ mod tests {
     fn test_undetermined() {
         let prev = IndentString::undetermined();
 
-        assert_eq!(prev.match_next("   x"), Ok((IndentString::spaces(&[3]), "x")));
+        assert_eq!(
+            prev.match_next("   x"),
+            Ok((IndentString::spaces(&[3]), "x"))
+        );
         assert_eq!(prev.match_next("\tx"), Ok((IndentString::tabs(&[1]), "x")));
-        assert_eq!(prev.match_next("x"), Ok((IndentString::undetermined(), "x")));
-        assert_eq!(prev.match_next("  "), Ok((IndentString::undetermined(), "")));
-        assert_eq!(prev.match_next("\n  x"), Ok((IndentString::spaces(&[2]), "x")));
-        assert_eq!(prev.match_next("\n  x\ny"), Ok((IndentString::spaces(&[2]), "x\ny")));
+        assert_eq!(
+            prev.match_next("x"),
+            Ok((IndentString::undetermined(), "x"))
+        );
+        assert_eq!(
+            prev.match_next("  "),
+            Ok((IndentString::undetermined(), ""))
+        );
+        assert_eq!(
+            prev.match_next("\n  x"),
+            Ok((IndentString::spaces(&[2]), "x"))
+        );
+        assert_eq!(
+            prev.match_next("\n  x\ny"),
+            Ok((IndentString::spaces(&[2]), "x\ny"))
+        );
         assert_eq!(prev.match_next(""), Ok((IndentString::undetermined(), "")));
         assert_eq!(prev.match_next("\t bad"), Err("\t bad"));
     }
@@ -255,16 +282,31 @@ mod tests {
         let prev = IndentString::spaces(&[2]);
 
         assert_eq!(prev.match_next("x"), Ok((IndentString::spaces(&[]), "x")));
-        assert_eq!(prev.match_next("  x"), Ok((IndentString::spaces(&[2]), "x")));
-        assert_eq!(prev.match_next("    x"), Ok((IndentString::spaces(&[2, 2]), "x")));
-        assert_eq!(prev.match_next("   x"), Ok((IndentString::spaces(&[2, 1]), "x")));
+        assert_eq!(
+            prev.match_next("  x"),
+            Ok((IndentString::spaces(&[2]), "x"))
+        );
+        assert_eq!(
+            prev.match_next("    x"),
+            Ok((IndentString::spaces(&[2, 2]), "x"))
+        );
+        assert_eq!(
+            prev.match_next("   x"),
+            Ok((IndentString::spaces(&[2, 1]), "x"))
+        );
         // Blank line
-        assert_eq!(prev.match_next("    "), Ok((IndentString::spaces(&[]), "")));
+        assert_eq!(
+            prev.match_next("    "),
+            Ok((IndentString::spaces(&[]), ""))
+        );
         // Inconsistent with unbroken two space prefix.
         assert_eq!(prev.match_next(" x"), Err(" x"));
         // Mixed indentation.
         assert_eq!(prev.match_next("  \tx"), Err("\tx"));
-        assert_eq!(prev.match_next("  \n  a"), Ok((IndentString::spaces(&[2]), "a")));
+        assert_eq!(
+            prev.match_next("  \n  a"),
+            Ok((IndentString::spaces(&[2]), "a"))
+        );
     }
 
     #[test]
@@ -273,8 +315,14 @@ mod tests {
 
         assert_eq!(prev.match_next("x"), Ok((IndentString::tabs(&[]), "x")));
         assert_eq!(prev.match_next("\tx"), Ok((IndentString::tabs(&[1]), "x")));
-        assert_eq!(prev.match_next("\t\tx"), Ok((IndentString::tabs(&[1, 1]), "x")));
-        assert_eq!(prev.match_next("\t\t\tx"), Ok((IndentString::tabs(&[1, 2]), "x")));
+        assert_eq!(
+            prev.match_next("\t\tx"),
+            Ok((IndentString::tabs(&[1, 1]), "x"))
+        );
+        assert_eq!(
+            prev.match_next("\t\t\tx"),
+            Ok((IndentString::tabs(&[1, 2]), "x"))
+        );
         // Blank line
         assert_eq!(prev.match_next("    "), Ok((IndentString::tabs(&[]), "")));
         // Mixed indentation.

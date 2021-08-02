@@ -24,7 +24,6 @@ pub enum ParsingMode {
     /// The colon is removed and the symbol is changed from kebab-case to
     /// camel_case when parsing.
     Key,
-
     /// Like Key, but instead of parsing anything, emit the '_contents' dummy
     /// key.
     DummyKey,
@@ -110,6 +109,10 @@ impl<'a> Cursor<'a> {
             current_depth: -1,
             seq_pos: None,
         }
+    }
+
+    pub fn input(&self) -> &'a str {
+        self.input
     }
 
     /// Return true if the cursor can enter a new sequence from the current
@@ -204,7 +207,7 @@ impl<'a> Cursor<'a> {
         if self.at_end() {
             Ok(())
         } else {
-            err!("Unparsed trailing input")
+            err!("Cursor::end: Unparsed trailing input {:?}", Trunc(self.input))
         }
     }
 
@@ -297,18 +300,16 @@ impl<'a> Cursor<'a> {
     pub fn start_block(&mut self) -> Result<()> {
         log::debug!("Cursor::start_block at {:?}", Trunc(self.input));
 
-        let (new_indent, _) = self
+        let (mut new_indent, _) = self
             .current_indent
             .match_next(self.input)
             .map_err(self.err("start_block: Bad indentation"))?;
 
-        println!("\x1b[1;32mcurrent: {:?} new: {:?}\x1b[0m", self.current_indent, new_indent);
-
         if !(new_indent.len() > self.current_indent.len())
         {
-            return err!(
-                "start_block: Body does not introduce deeper indentation"
-            );
+            // Create a dummy depth where we'll pop out from immediately.
+            // This represents an empty outline sequence.
+            new_indent = self.current_indent.dummy_next_depth();
         }
 
         self.start_file();
@@ -319,11 +320,14 @@ impl<'a> Cursor<'a> {
 
     pub fn start_line(&mut self) -> Result<()> {
         log::debug!("Cursor::start_line at {:?}", Trunc(self.input));
-        let indent = self.current_indent.clone();
-        self.parse(
-            |input| indent.match_same(input),
-            "start_line: Invalid indent",
-        )?;
+        if !parse::blank_line(self.input).is_ok() {
+            let indent = self.current_indent.clone();
+            self.parse(
+                |input| indent.match_same(input),
+                "start_line: Invalid indent",
+            )?;
+        }
+
         self.mode = ParsingMode::Line;
         Ok(())
     }

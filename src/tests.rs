@@ -175,7 +175,7 @@ fn test_tuple_tail_sequence_continuation() {
     );
 }
 
-//#[test]
+#[test]
 fn test_option_tuple() {
     test::<Vec<(Option<i32>, i32)>>(
         "\
@@ -190,70 +190,66 @@ fn test_option_tuple() {
 \t2",
         &vec![(None, 2)],
     );
-
-    test::<Vec<(Option<i32>, i32)>>(
-        "\
-
-\t2",
-        &vec![(None, 2)],
-    );
 }
 
-//#[test]
-fn test_canonical_outline() {
+#[test]
+fn test_empty_outline() {
     test("", &Outline::default());
+}
 
-    test("Xyzzy", &outline!["Xyzzy"]);
-
+#[test]
+fn test_outline_blanks() {
     test("A\n\nB", &outline![["A", ""], "B"]);
+}
 
-    test("A\n\tB\n\n\tC", &outline![["A", ["B", ""], "C"]]);
-
-    test("A\n  B", &outline!["A", "  B"]);
-
-    test(
-        "\
-Xyzzy
-\tPlugh",
-        &outline![["Xyzzy", "Plugh"]],
-    );
-
-    test(
-        "\
-Xyzzy
-Plugh",
-        &outline!["Xyzzy", "Plugh"],
-    );
-
-    test(
-        "\
-\tPlugh",
-        &outline![[, "Plugh"]],
-    );
-
+#[test]
+fn test_outline_empties() {
     test_inexact(
         "\
 --
-\tPlugh",
+  Plugh",
         &outline![[, "Plugh"]],
     );
 
+    // Unprincipled weirdness with outline types: empty comments and comment
+    // messages get treated differently.
+    test(
+        "\
+A
+-- This shows up
+\tC",
+        &outline!["A", ["-- This shows up", "C"]],
+    );
+}
+
+#[test]
+fn test_basic_outlines() {
+    test("Xyzzy", &outline!["Xyzzy"]);
+
+    test("A\nB", &outline!["A", "B"]);
+    test("A\nB\nC", &outline!["A", "B", "C"]);
+    test("A\n  B", &outline![["A", "B"]]);
+    test("A\n  B\nC", &outline![["A", "B"], "C"]);
+
+    test("A\n  B\n\n  C", &outline![["A", ["B", ""], "C"]]);
+
+    test("A\n  B", &outline!["A", "  B"]);
     test(
         "\
 Xyzzy
-\tPlugh
+  Plugh
 Qux
-\tQuux",
+  Quux",
         &outline![["Xyzzy", "Plugh"], ["Qux", "Quux"]],
     );
 
     test(
         "\
 Xyzzy
-\tPlugh
-\tBlorb
+  Plugh
+  Blorb
 Qux
-\tQuux",
+  Quux",
         &outline![["Xyzzy", "Plugh", "Blorb"], ["Qux", "Quux"]],
     );
 
@@ -274,15 +270,6 @@ A
         &outline!["A", [, "C"]],
     );
 
-    // Unprincipled weirdness with outline types: empty comments and comment
-    // messages get treated differently.
-    test(
-        "\
-A
--- This shows up
-\tC",
-        &outline!["A", ["-- This shows up", "C"]],
-    );
 }
 
 #[test]
