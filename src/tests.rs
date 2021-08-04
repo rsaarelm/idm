@@ -197,12 +197,12 @@ fn test_empty_outline() {
     test("", &Outline::default());
 }
 
-#[test]
+//#[test]
 fn test_outline_blanks() {
     test("A\n\nB", &outline![["A", ""], "B"]);
 }
 
-#[test]
+//#[test]
 fn test_outline_empties() {
     test_inexact(
         "\
@@ -222,7 +222,7 @@ A
     );
 }
 
-#[test]
+//#[test]
 fn test_basic_outlines() {
     test("Xyzzy", &outline!["Xyzzy"]);
 

@@ -300,17 +300,10 @@ impl<'a> Cursor<'a> {
     pub fn start_block(&mut self) -> Result<()> {
         log::debug!("Cursor::start_block at {:?}", Trunc(self.input));
 
-        let (mut new_indent, _) = self
+        let (new_indent, _) = self
             .current_indent
-            .match_next(self.input)
+            .extend(self.input)
             .map_err(self.err("start_block: Bad indentation"))?;
-
-        if !(new_indent.len() > self.current_indent.len())
-        {
-            // Create a dummy depth where we'll pop out from immediately.
-            // This represents an empty outline sequence.
-            new_indent = self.current_indent.dummy_next_depth();
-        }
 
         self.start_file();
         self.current_indent = new_indent;
@@ -323,7 +316,7 @@ impl<'a> Cursor<'a> {
         if !parse::blank_line(self.input).is_ok() {
             let indent = self.current_indent.clone();
             self.parse(
-                |input| indent.match_same(input),
+                |input| indent.parse(input),
                 "start_line: Invalid indent",
             )?;
         }
@@ -336,7 +329,7 @@ impl<'a> Cursor<'a> {
         log::debug!("Cursor::start_words at {:?}", Trunc(self.input));
         let indent = self.current_indent.clone();
         self.parse(
-            |input| indent.match_same(input),
+            |input| indent.parse(input),
             "start_words: Invalid indent",
         )?;
         self.mode = ParsingMode::Words;
@@ -358,7 +351,7 @@ impl<'a> Cursor<'a> {
 
         let (depth, _) = self
             .current_indent
-            .match_next(self.input)
+            .fill(self.input)
             .map_err(self.err("end_block: Bad indent"))?;
 
         if depth.len() < self.current_indent.len() {
@@ -528,7 +521,7 @@ impl<'a> Cursor<'a> {
         } else {
             let (new_indent, _) = self
                 .current_indent
-                .match_next(rest)
+                .fill(rest)
                 .map_err(self.err("classify: Bad indent"))?;
 
             if new_indent.len() > self.current_indent.len() {

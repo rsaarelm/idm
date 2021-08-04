@@ -62,19 +62,16 @@ impl IndentString {
 
     /// Build undetermined `IndentString` with segments `&[]`.
     ///
-    /// This is the only segment list allowed for an undetermined indent type
-    /// `IndentString`. It is still distinct from the default undetermined
-    /// `IndentString` since it's at column 0, not column -1 like the default.
+    /// An undetermined `IndentString` does not get to have a contentful
+    /// segment list like `spaces` and `tabs` do, because once there is actual
+    /// indentation you will know which character it uses. You still have the
+    /// result of this construction, which is at column 0, and the default
+    /// `IndentString` that is at column -1.
     pub fn undetermined() -> IndentString {
         IndentString {
             segments: vec![0],
             indent_char: '\0',
         }
-    }
-
-    /// Return the character length (not segment count) of this indent string.
-    pub fn str_len(&self) -> usize {
-        self.iter().sum()
     }
 
     pub fn pop(&mut self) -> Option<usize> {
@@ -112,14 +109,19 @@ impl IndentString {
         }
     }
 
-    /// Create a fake deeper level indent, for situations where you'll pop
-    /// right out.
-    pub fn dummy_next_depth(&self) -> IndentString {
+    fn minus_one_column(&self) -> IndentString {
+        IndentString {
+            segments: vec![],
+            indent_char: self.indent_char,
+        }
+    }
+
+    /// Clone of self, except if self has negative indent in which case the
+    /// result is adjusted to column 0.
+    fn clone_with_non_negative_column(&self) -> IndentString {
         let mut ret = self.clone();
         if ret.segments.is_empty() {
             ret.segments.push(0);
-        } else {
-            ret.segments.push(1);
         }
         ret
     }
@@ -132,11 +134,11 @@ impl IndentString {
     /// established, or vice versa.
     ///
     /// Will skip over blank lines until it finds a non-blank one. Will return
-    /// a zero indent if there are no contentful lines left.
+    /// an "out of file" negative column indent when there is no content left.
     ///
-    /// An error from `match_next` indicates inconsistent indentation and
+    /// An error from `fill` indicates inconsistent indentation and
     /// means that the entire input is unparseable.
-    pub fn match_next<'a>(&self, input: &'a str) -> Result<'a, IndentString> {
+    pub fn fill<'a>(&self, input: &'a str) -> Result<'a, IndentString> {
         // Function used to match indentations. Will get locked to spaces or
         // tabs.
         let indent_fn;
@@ -145,6 +147,11 @@ impl IndentString {
         // Eat blanks.
         let mut pos = input;
         while parse::r(&mut pos, parse::blank_line).is_ok() {}
+
+        if pos == "" {
+            // Out of input. Return the negative column state.
+            return Ok((self.minus_one_column(), ""));
+        }
 
         // Special case for column -1
         if self.is_empty() {
@@ -159,7 +166,7 @@ impl IndentString {
 
         // Set type of indentation used or exit early.
         match pos.chars().next() {
-            None => return Ok((self.zero_column(), "")),
+            None => unreachable!(),
             Some(ws) if ws == ' ' || ws == '\t' => {
                 if !ret.accepts(ws) {
                     // It's whitespace but not accepted by current state, must
@@ -209,15 +216,77 @@ impl IndentString {
         Ok((ret, pos))
     }
 
-    /// Like `match_next`, but indent must be equal to self.
-    pub fn match_same<'a>(&self, input: &'a str) -> Result<'a, IndentString> {
+    /// Like `fill`, but indent must be equal to self. Blank lines will parse
+    /// successfully.
+    pub fn parse<'a>(&self, input: &'a str) -> Result<'a, IndentString> {
+        if parse::blank_line(input).is_ok() {
+            return Ok((self.clone_with_non_negative_column(), input));
+        }
+
         let mut pos = input;
-        let next = parse::r(&mut pos, |input| self.match_next(input))?;
+        let next = parse::r(&mut pos, |input| self.fill(input))?;
         if &next == self {
             Ok((next, pos))
         } else {
             Err(input)
         }
+    }
+
+    /// Produce a deeper-indented version of the current indent string.
+    ///
+    /// If a new indent segment is found from a content string indented deeper
+    /// than the current indent string starting from `input` and stopping at
+    /// the first equal or lower indented content line, that segment is used
+    /// for the extension. Otherwise a dummy extension of a single character
+    /// of the current indentation type is used. The dummy extension will not
+    /// match anything other than a blank line in the current input and exists
+    /// only for stack machine logic purposes for the higher parsing
+    /// machinery.
+    pub fn extend<'a>(&self, input: &'a str) -> Result<'a, IndentString> {
+        // Grab the actual indent for examination
+        let (existing, rest) = self.fill(input)?;
+        let ret = if existing.len() > self.len() {
+            // A natural extension exists, use that.
+            debug_assert!(existing.len() == self.len() + 1);
+            existing
+        } else {
+            // There is no natural extension, create a dummy extension of one
+            // character.
+            let mut ret = self.clone();
+            if ret.segments.is_empty() {
+                ret.segments.push(0);
+            } else {
+                ret.segments.push(1);
+            }
+            ret
+        };
+        Ok((ret, rest))
+    }
+
+    /// Filling for an indented atom does not assume the first content line below
+    /// current depth when starting from input determines the current depth,
+    /// but is instead prepared for that file to be indented deeper and
+    /// possibly with inconsistent indentation than the upcoming lines. It
+    /// will walk through all the lines starting from `input` that are
+    /// indented below the current depth, find the one with shallowest
+    /// indentation, and set the next indent segment based on that line. The
+    /// indent to that line is required to be a valid indent string segment
+    /// (ie. using the same indent character the existing string does) and
+    /// must be shared by all indented lines, but beyond that prefix the lines
+    /// can have inconsistent indentation.
+    ///
+    /// This method is intended to be used when parsing multi-line `String`
+    /// values that may have indentation of their own that the IDM parsing
+    /// layer should ignore.
+    ///
+    /// The method is separate from `extend` because scanning the entire
+    /// outline is more expensive than stopping at the first content line and
+    /// assuming you can get acceptable indentation from that.
+    pub fn fill_for_indented_atom<'a>(
+        &self,
+        input: &'a str,
+    ) -> Result<'a, IndentString> {
+        todo!();
     }
 }
 
@@ -252,82 +321,55 @@ mod tests {
     fn test_undetermined() {
         let prev = IndentString::undetermined();
 
+        assert_eq!(prev.fill("   x"), Ok((IndentString::spaces(&[3]), "x")));
+        assert_eq!(prev.fill("\tx"), Ok((IndentString::tabs(&[1]), "x")));
+        assert_eq!(prev.fill("x"), Ok((IndentString::undetermined(), "x")));
+        assert_eq!(prev.fill("  "), Ok((prev.minus_one_column(), "")));
+        assert_eq!(prev.fill("\n  x"), Ok((IndentString::spaces(&[2]), "x")));
         assert_eq!(
-            prev.match_next("   x"),
-            Ok((IndentString::spaces(&[3]), "x"))
-        );
-        assert_eq!(prev.match_next("\tx"), Ok((IndentString::tabs(&[1]), "x")));
-        assert_eq!(
-            prev.match_next("x"),
-            Ok((IndentString::undetermined(), "x"))
-        );
-        assert_eq!(
-            prev.match_next("  "),
-            Ok((IndentString::undetermined(), ""))
-        );
-        assert_eq!(
-            prev.match_next("\n  x"),
-            Ok((IndentString::spaces(&[2]), "x"))
-        );
-        assert_eq!(
-            prev.match_next("\n  x\ny"),
+            prev.fill("\n  x\ny"),
             Ok((IndentString::spaces(&[2]), "x\ny"))
         );
-        assert_eq!(prev.match_next(""), Ok((IndentString::undetermined(), "")));
-        assert_eq!(prev.match_next("\t bad"), Err("\t bad"));
+        assert_eq!(prev.fill(""), Ok((prev.minus_one_column(), "")));
+        assert_eq!(prev.fill("\t bad"), Err("\t bad"));
     }
 
     #[test]
     fn test_spaces() {
         let prev = IndentString::spaces(&[2]);
 
-        assert_eq!(prev.match_next("x"), Ok((IndentString::spaces(&[]), "x")));
+        assert_eq!(prev.fill("x"), Ok((IndentString::spaces(&[]), "x")));
+        assert_eq!(prev.fill("  x"), Ok((IndentString::spaces(&[2]), "x")));
         assert_eq!(
-            prev.match_next("  x"),
-            Ok((IndentString::spaces(&[2]), "x"))
-        );
-        assert_eq!(
-            prev.match_next("    x"),
+            prev.fill("    x"),
             Ok((IndentString::spaces(&[2, 2]), "x"))
         );
-        assert_eq!(
-            prev.match_next("   x"),
-            Ok((IndentString::spaces(&[2, 1]), "x"))
-        );
+        assert_eq!(prev.fill("   x"), Ok((IndentString::spaces(&[2, 1]), "x")));
         // Blank line
-        assert_eq!(
-            prev.match_next("    "),
-            Ok((IndentString::spaces(&[]), ""))
-        );
+        assert_eq!(prev.fill("    "), Ok((prev.minus_one_column(), "")));
         // Inconsistent with unbroken two space prefix.
-        assert_eq!(prev.match_next(" x"), Err(" x"));
+        assert_eq!(prev.fill(" x"), Err(" x"));
         // Mixed indentation.
-        assert_eq!(prev.match_next("  \tx"), Err("\tx"));
-        assert_eq!(
-            prev.match_next("  \n  a"),
-            Ok((IndentString::spaces(&[2]), "a"))
-        );
+        assert_eq!(prev.fill("  \tx"), Err("\tx"));
+        assert_eq!(prev.fill("  \n  a"), Ok((IndentString::spaces(&[2]), "a")));
     }
 
     #[test]
     fn test_tabs() {
         let prev = IndentString::tabs(&[1]);
 
-        assert_eq!(prev.match_next("x"), Ok((IndentString::tabs(&[]), "x")));
-        assert_eq!(prev.match_next("\tx"), Ok((IndentString::tabs(&[1]), "x")));
+        assert_eq!(prev.fill("x"), Ok((IndentString::tabs(&[]), "x")));
+        assert_eq!(prev.fill("\tx"), Ok((IndentString::tabs(&[1]), "x")));
+        assert_eq!(prev.fill("\t\tx"), Ok((IndentString::tabs(&[1, 1]), "x")));
         assert_eq!(
-            prev.match_next("\t\tx"),
-            Ok((IndentString::tabs(&[1, 1]), "x"))
-        );
-        assert_eq!(
-            prev.match_next("\t\t\tx"),
+            prev.fill("\t\t\tx"),
             Ok((IndentString::tabs(&[1, 2]), "x"))
         );
         // Blank line
-        assert_eq!(prev.match_next("    "), Ok((IndentString::tabs(&[]), "")));
+        assert_eq!(prev.fill("    "), Ok((prev.minus_one_column(), "")));
         // Mixed indentation.
-        assert_eq!(prev.match_next("\t  x"), Err("  x"));
+        assert_eq!(prev.fill("\t  x"), Err("  x"));
 
-        assert_eq!(IndentString::tabs(&[2]).match_next("\tx"), Err("\tx"));
+        assert_eq!(IndentString::tabs(&[2]).fill("\tx"), Err("\tx"));
     }
 }

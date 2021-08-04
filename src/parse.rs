@@ -55,7 +55,7 @@ pub fn outline_item<'a: 'b, 'b>(
     current_indent: &'b IndentString,
 ) -> impl Fn(&'a str) -> Result<'a, String> + 'b {
     move |input| {
-        let (local_indent, _) = current_indent.match_next(input)?;
+        let (local_indent, _) = current_indent.fill(input)?;
         if local_indent.len() < current_indent.len() {
             // No items
             Err(input)
@@ -146,7 +146,7 @@ fn indented_comment<'a, 'b>(
     input: &'a str,
 ) -> Result<'a, &'a str> {
     let mut pos = input;
-    r(&mut pos, |input| current_indent.match_same(input))?;
+    r(&mut pos, |input| current_indent.parse(input))?;
     comment(pos)
 }
 
@@ -215,7 +215,7 @@ pub fn non_content<'a: 'b, 'b>(
 
             // Consume blanks.
             r(&mut pos, blank_lines)?;
-            let (indent, _) = current_indent.match_next(pos)?;
+            let (indent, _) = current_indent.fill(pos)?;
 
             if indent.len() < current_indent.len() {
                 // Block has ended, exit
@@ -272,7 +272,7 @@ pub fn indented_line<'a, 'b>(
 ) -> Result<'a, &'a str> {
     let mut pos = input;
     // Eat indent up to the expected level.
-    let indent = r(&mut pos, |a| prev.match_next(a))?;
+    let indent = r(&mut pos, |a| prev.fill(a))?;
 
     // If the new level is above expected, we don't have our line. Exit.
     if indent.len() < prev.len() {
@@ -281,7 +281,7 @@ pub fn indented_line<'a, 'b>(
 
     // Once the indent has been verified and skipped, use regular line parse.
     // Preserve indentation past the given level.
-    line(&input[prev.str_len()..])
+    line(pos)
 }
 
 /// Read body indented beyond previous indentation.
@@ -298,7 +298,7 @@ pub fn indented_body<'a, 'b>(
     input: &'a str,
 ) -> Result<'a, String> {
     // Find the minimum indent.
-    let (mut indent, _) = prev.match_next(input)?;
+    let (mut indent, _) = prev.fill(input)?;
     if indent.len() == prev.len() {
         // No indented lines found
         return Err(input);
@@ -315,7 +315,7 @@ pub fn indented_body<'a, 'b>(
 
         // We might catch inconsistent indentation with the existing indents
         // here.
-        let candidate = r(&mut pos, |input| prev.match_next(input))?;
+        let candidate = r(&mut pos, |input| prev.fill(input))?;
         if candidate.len() <= prev.len() {
             break;
         } else {
@@ -342,8 +342,7 @@ pub fn indented_body<'a, 'b>(
             ret.push('\n');
         } else {
             let mut next_pos = pos;
-            let line_indent =
-                r(&mut next_pos, |input| indent.match_next(input))?;
+            let line_indent = r(&mut next_pos, |input| indent.fill(input))?;
 
             if line_indent.len() < indent.len() {
                 break;
