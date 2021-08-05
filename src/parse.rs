@@ -272,12 +272,7 @@ pub fn indented_line<'a, 'b>(
 ) -> Result<'a, &'a str> {
     let mut pos = input;
     // Eat indent up to the expected level.
-    let indent = r(&mut pos, |a| prev.fill(a))?;
-
-    // If the new level is above expected, we don't have our line. Exit.
-    if indent.len() < prev.len() {
-        return Err(input);
-    }
+    r(&mut pos, |a| prev.parse(a))?;
 
     // Once the indent has been verified and skipped, use regular line parse.
     // Preserve indentation past the given level.
