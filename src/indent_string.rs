@@ -174,6 +174,9 @@ impl IndentString {
         if !indent.chars().all(|c| c == self.indent_char) {
             return Err(indent);
         }
+
+        // You could somehow contrive to have a slice filled with null chars
+        // and try to pass it to an undetermined IndentString, let's nix that.
         if self.indent_char == '\0' && !indent.is_empty() {
             return Err(indent);
         }
@@ -181,17 +184,28 @@ impl IndentString {
         let mut ret = self.zero_column();
 
         let mut len = 0;
-        for (i, n) in self.segments.iter().enumerate() {
-            // Loop through segment points
-            //
-            // If indent len snaps with current point, return corresponding new
-            // IndentString.
-            //
-            // If indent len is less than current point, it didn't line up with
-            // segment and failed.
+        let mut segments = Vec::new();
+
+        for &n in self.segments.iter() {
+            segments.push(n);
+            len += n;
+
+            // End of indent falls between segments, bail out.
+            if indent.len() < len {
+                return Err(indent);
+            }
+
+            // Indent snaps precisely to end of segment.
+            if indent.len() == len {
+                ret.segments = segments;
+                return Ok((ret, ""));
+            }
         }
 
-        todo!();
+        debug_assert!(indent.len() > len);
+        segments.push(indent.len() - len);
+        ret.segments = segments;
+        Ok((ret, ""))
     }
 
     /// Try to match indentations on next line given self as current indent
