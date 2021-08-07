@@ -113,6 +113,16 @@ impl IndentString {
         String::from_utf8(vec![self.indent_char as u8; n]).unwrap()
     }
 
+    pub fn input_char(&self) -> Option<char> {
+        match self.indent_char {
+            '\0' => None,
+            ' ' => Some(' '),
+            '\t' => Some('\t'),
+            _ => panic!("Bad input char"),
+        }
+
+    }
+
     fn accepts(&self, ch: char) -> bool {
         match self.indent_char {
             '\0' => ch == ' ' || ch == '\t',
@@ -270,6 +280,9 @@ impl IndentString {
 
     /// Match the exact indent string to input and return remaining input
     /// after indent string.
+    ///
+    /// Will still succeed if there is further indentation beyond this indent
+    /// string. The additional indentation will not be consumed.
     pub fn parse<'a>(&self, input: &'a str) -> Result<'a, ()> {
         let n_chars = self.segments.iter().sum();
         // Empty indent, always match.
@@ -289,6 +302,22 @@ impl IndentString {
         }
 
         repeat(self.indent_char, n_chars, input).map(|(_, rest)| ((), rest))
+    }
+
+    /// Like `parse`, but will fail if there is further indentation past this
+    /// indent string in the input.
+    pub fn parse_exact<'a>(&self, input: &'a str) -> Result<'a, ()> {
+        let (_, rest) = self.parse(input)?;
+        if parse::blank_line(rest).is_ok() {
+            return Ok(((), rest));
+        }
+
+        if rest.chars().next().map_or(false, |c| c.is_whitespace()) {
+            // Further indentation detected.
+            return Err(input);
+        }
+
+        Ok(((), rest))
     }
 
     /// Produce a deeper-indented version of the current indent string.
