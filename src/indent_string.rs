@@ -30,6 +30,23 @@ impl<'a> std::ops::Deref for IndentString {
     }
 }
 
+// XXX: Where do we need this?
+impl Into<Option<String>> for &IndentString {
+    fn into(self) -> Option<String> {
+        if self.segments.len() == 0 {
+            return None;
+        }
+        let n = self.segments.iter().count();
+        if n > 0 && self.indent_char == '\0' {
+            panic!(
+                "Can't turn non-empty undetermined IndentString into String"
+            );
+        }
+
+        Some(String::from_utf8(vec![self.indent_char as u8; n]).unwrap())
+    }
+}
+
 impl IndentString {
     fn build(indent_char: char, segments: &[usize]) -> IndentString {
         let input = segments;
@@ -83,6 +100,7 @@ impl IndentString {
     ///
     /// Will panic if the indent string is undetermined and requested depth is
     /// not zero.
+    #[deprecated] // Use Into<Option<String>> instead
     pub fn string(&self, n: usize) -> String {
         if n == 0 {
             return "".into();
@@ -126,6 +144,37 @@ impl IndentString {
         ret
     }
 
+    /// Extend indent string with 1 character dummy indent.
+    fn extend(&self) -> IndentString {
+        let mut ret = self.clone();
+
+        if ret.segments.is_empty() {
+            ret.segments.push(0);
+        } else {
+            ret.segments.push(1);
+        }
+
+        ret
+    }
+
+    /// Match a slice that must be pure indent that matches with segments and
+    /// indent char of this indent string into the corresponding indent
+    /// string.
+    pub fn merge<'a>(&self, indent: &'a str) -> Result<'a, IndentString> {
+        // Loop through segment points
+        //
+        // If indent len snaps with current point, return corresponding new
+        // IndentString.
+        //
+        // If indent len is less than current point, it didn't line up with
+        // segment and failed.
+        if !indent.chars().all(|c| c == self.indent_char) {
+            return Err(indent);
+        }
+
+        todo!();
+    }
+
     /// Try to match indentations on next line given self as current indent
     /// string.
     ///
@@ -139,6 +188,9 @@ impl IndentString {
     /// An error from `fill` indicates inconsistent indentation and
     /// means that the entire input is unparseable.
     pub fn fill<'a>(&self, input: &'a str) -> Result<'a, IndentString> {
+        // TODO: Rewrite in terms of parse::indent and merge. (Possibly
+        // remove?)
+
         // Function used to match indentations. Will get locked to spaces or
         // tabs.
         let indent_fn;
@@ -249,7 +301,7 @@ impl IndentString {
     /// match anything other than a blank line in the current input and exists
     /// only for stack machine logic purposes for the higher parsing
     /// machinery.
-    pub fn extend<'a>(&self, input: &'a str) -> Result<'a, IndentString> {
+    pub fn extend_to<'a>(&self, input: &'a str) -> Result<'a, IndentString> {
         // Grab the actual indent for examination
         let (existing, rest) = self.fill(input)?;
         let ret = if existing.len() > self.len() {
@@ -259,32 +311,23 @@ impl IndentString {
         } else {
             // There is no natural extension, create a dummy extension of one
             // character.
-            let mut ret = self.clone();
-            if ret.segments.is_empty() {
-                ret.segments.push(0);
-            } else {
-                ret.segments.push(1);
-            }
-            ret
+            self.extend()
         };
         Ok((ret, rest))
     }
 
-    /// Filling for an indented atom does not assume the first content line below
-    /// current depth when starting from input determines the current depth,
-    /// but is instead prepared for that file to be indented deeper and
-    /// possibly with inconsistent indentation than the upcoming lines. It
-    /// will walk through all the lines starting from `input` that are
-    /// indented below the current depth, find the one with shallowest
-    /// indentation, and set the next indent segment based on that line. The
-    /// indent to that line is required to be a valid indent string segment
-    /// (ie. using the same indent character the existing string does) and
-    /// must be shared by all indented lines, but beyond that prefix the lines
-    /// can have inconsistent indentation.
+    /// Determine indent for a multiline atom whose insides do not necessarily
+    /// agree with structural indentation conventions. Return the indent
+    /// string at the first line of the atom and the input starting from the
+    /// contents of the first line immediately after the input string.
     ///
-    /// This method is intended to be used when parsing multi-line `String`
-    /// values that may have indentation of their own that the IDM parsing
-    /// layer should ignore.
+    /// The resulting indent string will indent up to the leftmost contentful
+    /// line in the block of contiguous lines from the start of input that are
+    /// indented deeper than the current indent string. If all the lines do
+    /// not agree to a consistend indent string up to this depth, the function
+    /// will fail. The lines do not need to agree with the indentation past
+    /// the level of indentation, since it is not expected that further
+    /// structural parsing will be done to the value.
     ///
     /// The method is separate from `extend` because scanning the entire
     /// outline is more expensive than stopping at the first content line and
@@ -293,6 +336,18 @@ impl IndentString {
         &self,
         input: &'a str,
     ) -> Result<'a, IndentString> {
+        let mut pos = input;
+
+        /*
+        // Probe: Go at least one character deeper than current, will keep
+        // matching lines as long as we're in a block deeper than current
+        // depth.
+        let mut min_indent = self.extend();
+        // Determine level.
+        loop {
+            if let Ok((
+        }
+        */
         todo!();
     }
 }

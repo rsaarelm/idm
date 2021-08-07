@@ -101,11 +101,79 @@ pub fn word(input: &str) -> Result<&str> {
     Ok((ret, rest))
 }
 
+/// Succeed if input is at the end of usable content.
+///
+/// Trailing white space is ignored.
+pub fn eof(input: &str) -> Result<()> {
+    if input.chars().all(|c| c.is_whitespace()) {
+        Ok(((), ""))
+    } else {
+        Err(input)
+    }
+}
+
+/// Return the indentation prefix for a line.
+///
+/// Will fail at `eof`. If run on blank line, will skip ahead until it finds a
+/// contentful line. Will fail if the indentation string mixes tabs and
+/// spaces.
+///
+/// The remaining input returned will always be on the line where `indent` was
+/// run. If the initial line has content, remaining input will be at start of
+/// content. If the line is blank, no input will be consumed.
+pub fn indent(input: &str) -> Result<&str> {
+    // Indentation is undefined if there are no contentful lines ahead of the
+    // input position.
+    if eof(input).is_ok() {
+        return Err(input);
+    }
+
+    let mut pos = input;
+
+    // Consume blank lines.
+    loop {
+        if r(&mut pos, blank_line).is_err() {
+            break;
+        }
+    }
+
+    // Once the indentation starts, remember which char was used.
+    // Zero byte is used before any indentation has been seen.
+    let mut indent_char = '\0';
+
+    let mut len = 0;
+    for (i, c) in pos.char_indices() {
+        debug_assert!(c != '\n'); // Already skipped blank lines.
+        len = i;
+        if c.is_whitespace() {
+            if indent_char != '\0' && c != indent_char {
+                // Multiple types of indent char seen.
+                return Err(input);
+            }
+            if c != ' ' && c != '\t' {
+                // Unsupported input char.
+                return Err(input);
+            }
+            indent_char = c;
+        } else {
+            break;
+        }
+    }
+
+    if pos != input {
+        // First line was blank, consume nothing.
+        Ok((&pos[..len], input))
+    } else {
+        // Indent was extracted from first line, consume indent.
+        Ok((&pos[..len], &input[len..]))
+    }
+}
+
 /// Read line until newline, rest of the content is after newline.
 ///
 /// Fails if there is no input.
 pub fn line(input: &str) -> Result<&str> {
-    if input == "" {
+    if eof(input).is_ok() {
         Err(input)
     } else {
         let p = input.find('\n').unwrap_or(input.len());
@@ -423,6 +491,32 @@ mod tests {
 
         assert_eq!(key("foo: bar"), Ok(("foo".into(), "bar")));
         assert_eq!(key("foo-bar: baz"), Ok(("foo_bar".into(), "baz")));
+    }
+
+    #[test]
+    fn test_indent() {
+        // Normal cases.
+        assert_eq!(indent("    xyzzy"), Ok(("    ", "xyzzy")));
+        assert_eq!(indent("\txyzzy"), Ok(("\t", "xyzzy")));
+        assert_eq!(indent("    xyzzy\nplugh"), Ok(("    ", "xyzzy\nplugh")));
+
+        // Scan ahead when there are blanks.
+        assert_eq!(indent("\n    xyzzy"), Ok(("    ", "\n    xyzzy")));
+        assert_eq!(indent("   \n    xyzzy"), Ok(("    ", "   \n    xyzzy")));
+        assert_eq!(indent("\n  \n    xyzzy"), Ok(("    ", "\n  \n    xyzzy")));
+        assert_eq!(indent("\n\txyzzy"), Ok(("\t", "\n\txyzzy")));
+
+        // No defined indent when there is only whitespace left.
+        assert!(indent("").is_err());
+        assert!(indent("    ").is_err());
+        assert!(indent("\t").is_err());
+        assert!(indent("    \n").is_err());
+        assert!(indent("\t\n").is_err());
+        assert!(indent("    \n   ").is_err());
+
+        // Mixed indentation is not allowed.
+        assert!(indent(" \txyzzy").is_err());
+        assert!(indent("\t xyzzy").is_err());
     }
 
     #[test]

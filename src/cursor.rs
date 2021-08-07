@@ -302,7 +302,7 @@ impl<'a> Cursor<'a> {
 
         let (new_indent, _) = self
             .current_indent
-            .extend(self.input)
+            .extend_to(self.input)
             .map_err(self.err("start_block: Bad indentation"))?;
 
         self.start_file();
