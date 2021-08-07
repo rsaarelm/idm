@@ -171,15 +171,24 @@ impl IndentString {
     /// indent char of this indent string into the corresponding indent
     /// string.
     pub fn merge<'a>(&self, indent: &'a str) -> Result<'a, IndentString> {
-        // Loop through segment points
-        //
-        // If indent len snaps with current point, return corresponding new
-        // IndentString.
-        //
-        // If indent len is less than current point, it didn't line up with
-        // segment and failed.
         if !indent.chars().all(|c| c == self.indent_char) {
             return Err(indent);
+        }
+        if self.indent_char == '\0' && !indent.is_empty() {
+            return Err(indent);
+        }
+
+        let mut ret = self.zero_column();
+
+        let mut len = 0;
+        for (i, n) in self.segments.iter().enumerate() {
+            // Loop through segment points
+            //
+            // If indent len snaps with current point, return corresponding new
+            // IndentString.
+            //
+            // If indent len is less than current point, it didn't line up with
+            // segment and failed.
         }
 
         todo!();
