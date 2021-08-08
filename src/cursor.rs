@@ -81,13 +81,14 @@ pub struct Cursor<'a> {
     current_indent: IndentString,
     /// Line number of current input line.
     line_number: i32,
+
     pub mode: ParsingMode,
-    pub current_depth: i32,
     pub seq_pos: Option<SequencePos>,
 
     // Old cursor stuff, deprecated, remove
     /// At the start of the current input line.
     line_start: &'a str,
+    pub current_depth: i32,
 }
 
 ////////////////////////////////
