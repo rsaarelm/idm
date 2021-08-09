@@ -10,6 +10,7 @@ mod indent_string;
 
 mod outline;
 
+mod new_parse;
 mod parse;
 
 mod ser;
