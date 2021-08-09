@@ -77,6 +77,9 @@ fn eol((prefix, input): (IndentPrefix, &str)) -> Result<()> {
 ///
 /// Move to line starting next block if block was successfully ended.
 pub fn eob((prefix, input): (IndentPrefix, &str)) -> Result<()> {
+    // If at eof, also at eob, exit early.
+    // Otherwise determine input's indent, it will be defined when not at eob.
+    //
     todo!()
 }
 
@@ -122,10 +125,11 @@ pub fn enter_body((prefix, input): (IndentPrefix, &str)) -> Result<String> {
 /// The indentation must match the indentation character used in the existing
 /// prefix and be followed by non-newline, non-whitespace content.
 ///
-/// Encountering inconsistent indentation will fail the function. If the
-/// current input line is at eob, returns prefix. If current input is a blank
-/// line (eol), will return the indent prefix of the first contentful line
-/// encountered when reading ahead in the same indent block.
+/// Encountering mixed indentation (tabs when previous indent was spaces or
+/// vice versa) will fail the function. If the current input line is at eob,
+/// returns prefix. If current input is a blank line (eol), will return the
+/// indent prefix of the first contentful line encountered when reading ahead
+/// in the same indent block.
 ///
 /// It's assumed that `input` will be at the start of a line when this is
 /// called.
@@ -133,9 +137,33 @@ fn indent((prefix, input): (IndentPrefix, &str)) -> Result<()> {
     todo!()
 }
 
-/// Parse indent segment that matches indent char used in prefix.
-fn indent_segment((prefix, input): (IndentPrefix, &str)) -> Result<&str> {
-    todo!()
+/// Return indent prefix for a non-blank line, `None` otherwise.
+fn line_indent((prefix, input): (IndentPrefix, &str)) -> Result<Option<IndentPrefix>> {
+    if eol((prefix, input)).is_ok() {
+        return Ok((None, (prefix, input)));
+    }
+
+    let indent_char = match input.chars().next() {
+        None => return Err(input),
+        Some(c) if c == ' ' || c == '\t' => c,
+        _ => {
+            return Ok((Some(IndentPrefix::default()), (prefix, input)));
+        }
+    };
+
+    let mut len = 0;
+    for c in input.chars() {
+        if c == indent_char {
+            len += 1;
+        } else if c.is_whitespace() {
+            // Mixed indentation detected.
+            return Err(&input[len..]);
+        } else {
+            break;
+        }
+    }
+
+    Ok((Some(IndentPrefix { indent_char: Some(indent_char), len }), (prefix, &input[len..])))
 }
 
 
@@ -145,7 +173,7 @@ fn indent_segment((prefix, input): (IndentPrefix, &str)) -> Result<&str> {
 /// be specified even when they don't have a corresponding slice.
 #[derive(Default, Copy, Clone, Eq, PartialEq)]
 pub struct IndentPrefix {
-    ch: Option<char>,
+    indent_char: Option<char>,
     len: usize,
 }
 
@@ -156,7 +184,7 @@ impl fmt::Display for IndentPrefix {
         }
 
         // A dummy indent from unspecified indent level will be unprintable.
-        let ch = self.ch.expect("IndentPrefix::fmt: Unprintable dummy indent");
+        let ch = self.indent_char.expect("IndentPrefix::fmt: Unprintable dummy indent");
         for _ in 0..self.len {
             write!(f, "{}", ch)?;
         }
