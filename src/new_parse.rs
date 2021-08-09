@@ -1,10 +1,11 @@
+use std::fmt;
 
-pub type Result<'a, T> = std::result::Result<(T, (&'a str, &'a str)), &'a str>;
+pub type Result<'a, T> = std::result::Result<(T, (IndentPrefix, &'a str)), &'a str>;
 
 /// Read item from mutable slice, update slice if read was successful.
 pub fn r<'a, T>(
-    s: &mut (&'a str, &'a str),
-    item: impl Fn((&'a str, &'a str)) -> Result<'a, T>
+    s: &mut (IndentPrefix, &'a str),
+    item: impl Fn((IndentPrefix, &'a str)) -> Result<'a, T>
 ) -> std::result::Result<T, &'a str> {
     item(*s).map(|(ret, rest)| {
         *s = rest;
@@ -16,7 +17,7 @@ pub fn r<'a, T>(
 ///
 /// Fail if there is only whitespace left on line.
 /// Consume whitespace after the word.
-pub fn word<'a>((prefix, input): (&'a str, &'a str)) -> Result<'a, &'a str> {
+pub fn word((prefix, input): (IndentPrefix, &str)) -> Result<&str> {
     if input.chars().next().map_or(true, |c| c.is_whitespace()) {
         return Err(input);
     }
@@ -48,7 +49,7 @@ pub fn word<'a>((prefix, input): (&'a str, &'a str)) -> Result<'a, &'a str> {
 /// Succeed if input is at the end of usable content.
 ///
 /// Trailing white space is ignored.
-fn eof<'a>((prefix, input): (&'a str, &'a str)) -> Result<()> {
+fn eof((prefix, input): (IndentPrefix, &str)) -> Result<()> {
     if input.chars().all(|c| c.is_whitespace()) {
         Ok(((), (prefix, "")))
     } else {
@@ -59,7 +60,7 @@ fn eof<'a>((prefix, input): (&'a str, &'a str)) -> Result<()> {
 /// Succeed if there's no content left on input line.
 ///
 /// Move to next line if whitespace was succesfully consumed.
-fn eol<'a>((prefix, input): (&'a str, &'a str)) -> Result<'a, ()> {
+fn eol((prefix, input): (IndentPrefix, &str)) -> Result<()> {
     for (i, c) in input.char_indices() {
         if c == '\n' {
             return Ok(((), (prefix, &input[i+1..])));
@@ -75,7 +76,7 @@ fn eol<'a>((prefix, input): (&'a str, &'a str)) -> Result<'a, ()> {
 /// Succeed if input is at end of current block of indentation.
 ///
 /// Move to line starting next block if block was successfully ended.
-pub fn eob<'a>((prefix, input): (&'a str, &'a str)) -> Result<'a, ()> {
+pub fn eob((prefix, input): (IndentPrefix, &str)) -> Result<()> {
     todo!()
 }
 
@@ -86,13 +87,13 @@ pub fn eob<'a>((prefix, input): (&'a str, &'a str)) -> Result<'a, ()> {
 ///
 /// Does not consume anything, affects the indent prefix in the remaining
 /// input parameter instead.
-pub fn dedent<'a>((prefix, input): (&'a str, &'a str)) -> Result<'a, ()> {
+pub fn dedent((prefix, input): (IndentPrefix, &str)) -> Result<()> {
     todo!();
 }
 
 /// Parse section of the outline with headline at current input position (line
 /// and exact indent prefix), return result with the indent prefix stripped.
-pub fn section<'a>((prefix, input): (&'a str, &'a str)) -> Result<'a, String> {
+pub fn section((prefix, input): (IndentPrefix, &str)) -> Result<String> {
     // TODO: Helper function that takes &mut String as parameter. Will also be
     // used to implement `block`.
     todo!();
@@ -101,7 +102,7 @@ pub fn section<'a>((prefix, input): (&'a str, &'a str)) -> Result<'a, String> {
 /// Parse remaining sections in current block (content for each must start at
 /// exactly the indent prefix), return string of them with the indent prefix
 /// stripped.
-pub fn block<'a>((prefix, input): (&'a str, &'a str)) -> Result<'a, String> {
+pub fn block((prefix, input): (IndentPrefix, &str)) -> Result<String> {
     // TODO: Just call section helper repeatedly until at EOB.
     todo!();
 }
@@ -111,9 +112,8 @@ pub fn block<'a>((prefix, input): (&'a str, &'a str)) -> Result<'a, String> {
 ///
 /// Will fail if there are no contentful body lines indented deeper than the
 /// headline.
-pub fn enter_body<'a>((prefix, input): (&'a str, &'a str)) -> Result<'a, String> {
-    // XXX: Fixme, can't actually create a dummy prefix as &str, because it
-    // doesn't exist anywhere in the content.
+pub fn enter_body((prefix, input): (IndentPrefix, &str)) -> Result<String> {
+    todo!();
 }
 
 /// Parse indentation string starting from input. The new indentation will be
@@ -129,14 +129,45 @@ pub fn enter_body<'a>((prefix, input): (&'a str, &'a str)) -> Result<'a, String>
 ///
 /// It's assumed that `input` will be at the start of a line when this is
 /// called.
-fn indent<'a>((prefix, input): (&'a str, &'a str)) -> Result<'a, ()> {
+fn indent((prefix, input): (IndentPrefix, &str)) -> Result<()> {
     todo!()
 }
 
 /// Parse indent segment that matches indent char used in prefix.
-fn indent_segment<'a>((prefix, input): (&'a str, &'a str)) -> Result<'a, &str> {
+fn indent_segment((prefix, input): (IndentPrefix, &str)) -> Result<&str> {
     todo!()
 }
+
+
+/// Stack-dwelling fake string object.
+///
+/// Used instead of `&str` for indent prefixes so that dummy indent levels can
+/// be specified even when they don't have a corresponding slice.
+#[derive(Default, Copy, Clone, Eq, PartialEq)]
+pub struct IndentPrefix {
+    ch: Option<char>,
+    len: usize,
+}
+
+impl fmt::Display for IndentPrefix {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        if self.len > 0 {
+            return Ok(());
+        }
+
+        // A dummy indent from unspecified indent level will be unprintable.
+        let ch = self.ch.expect("IndentPrefix::fmt: Unprintable dummy indent");
+        for _ in 0..self.len {
+            write!(f, "{}", ch)?;
+        }
+        Ok(())
+    }
+}
+
+impl IndentPrefix {
+    fn len(self) -> usize { self.len }
+}
+
 
 #[cfg(test)]
 mod tests {
