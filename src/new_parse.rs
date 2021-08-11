@@ -1,3 +1,5 @@
+// REMOVEME: Use lexer.rs
+
 use std::fmt;
 
 pub type Result<'a, T> = std::result::Result<(T, (IndentPrefix, &'a str)), &'a str>;

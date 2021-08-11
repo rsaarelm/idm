@@ -1,3 +1,5 @@
+// REMOVEME: Use lexer.rs
+
 //! Stateless parsing primitives
 //!
 //! This is the bottom level of the parsing system. Things should be pushed
