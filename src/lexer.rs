@@ -7,7 +7,7 @@ use std::fmt;
 /// any of the methods. Use a clone of the main lexer when doing recoverable
 /// probing operations and call primitives on the main lexer when their
 /// failure will fail the entire parse.
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq, Debug)]
 pub struct Lexer<'a> {
     /// Is the indentation based on spaces or tabs.
     ///
@@ -25,6 +25,9 @@ pub struct Lexer<'a> {
     /// Regular level 0 indent is represented by having a single 0-valued
     /// element at the start of the list.
     indent_segments: Vec<usize>,
+
+    // NB: Keep input as the last field so the tail of the input will be the
+    // only thing cut by the abbreviating Display operation.
 
     /// The remaining input to be lexed.
     input: &'a str,
@@ -49,6 +52,7 @@ impl<'a> Lexer<'a> {
     pub fn end(&mut self) -> Result<()> {
         for (i, c) in self.input.char_indices() {
             if !c.is_whitespace() {
+                log::debug!("Lexer::end still has input");
                 return Err(&self.input[i..]);
             }
         }
@@ -70,9 +74,11 @@ impl<'a> Lexer<'a> {
     /// Will fail when there is neither a headline (at depth -1 or indented to
     /// an empty body) nor any body lines.
     pub fn enter_body(&mut self) -> Result<Option<&'a str>> {
+        log::debug!("Hello world");
         // At EOF.
         // - Can't have headline or body, fail out.
         if self.input == "" {
+            log::debug!("Lexer::enter_body at EOF");
             return Err(self.input);
         }
 
@@ -215,46 +221,53 @@ impl<'a> Lexer<'a> {
 impl<'a> Lexer<'a> {
     /// Read a section into an existing string buffer.
     fn read_section(&mut self, buffer: &mut String) -> Result<()> {
+        if self.input == "" {
+            return Err("");
+        }
+
+        // XXX: read_section does not currently validate segment dedent
+        // consistency within the section.
+
         let (current_prefix, _) = parse::indent(self.input)?;
         self.witness_indentation_char(current_prefix)
             .map_err(|_| self.input)?;
+        let indent_len: usize = self.indent_segments.iter().sum();
         let new_segments: Vec<usize> =
             self.match_indent(current_prefix).map_err(|_| self.input)?;
 
-        if new_segments.len() < self.indent_segments.len() {
+        if current_prefix.len() < indent_len {
+            log::debug!("Lexer::read_section Err: out of depth");
             // Dropped out of depth, no go.
             return Err(self.input);
         }
 
-        let dedent_segments = if new_segments.len() > self.indent_segments.len()
-        {
-            // No headline, read body directly, dedent at body depth.
-            new_segments
-        } else {
-            // Headline is there, dedent at headline depth.
-            self.indent_segments.clone()
-        };
+        let has_headline = current_prefix.len() == indent_len && !self.indent_segments.is_empty();
 
-        let indent_len: usize = dedent_segments.iter().sum();
+        // Set to true at start of loop if a headline exists.
+        let mut at_headline = has_headline;
+
         while self.input != "" {
             // Verify indentation at new level.
             let (line, rest) = parse::line(self.input)?;
             let (indent, _) = parse::indent(self.input)?;
             self.witness_indentation_char(indent)
                 .map_err(|_| self.input)?;
-            let line_segments =
-                self.match_indent(indent).map_err(|_| self.input)?;
 
-            if line_segments.len() < dedent_segments.len() {
+            if has_headline && !at_headline && indent.len() <= current_prefix.len() {
+                // End of section, exit.
+                break;
+            }
+            if !has_headline && indent.len() < current_prefix.len() {
                 // Out of depth, exit.
                 break;
             }
+            at_headline = false;
 
             if line.chars().all(|c| c.is_whitespace()) {
                 // Blank line.
                 buffer.push('\n');
             } else {
-                buffer.push_str(&line[indent_len..]);
+                buffer.push_str(&line[current_prefix.len()..]);
                 buffer.push('\n');
             }
             self.input = rest;
@@ -283,6 +296,7 @@ impl<'a> Lexer<'a> {
 
         // At column -1 it's an error to start with any indent other than 0.
         if self.indent_segments.is_empty() && !prefix.is_empty() {
+            log::debug!("Lexer::match_indent Err: first line has nonzero indent");
             return Err(());
         }
 
@@ -291,6 +305,7 @@ impl<'a> Lexer<'a> {
         let indent_char = prefix.chars().next().unwrap();
         debug_assert!(prefix.chars().all(|c| c == indent_char));
         if indent_char != self.indent_char.unwrap_or(indent_char) {
+            log::debug!("Lexer::match_indent Err: mixed indentation detected");
             // Mixed indentation, fail.
             return Err(());
         }
@@ -305,6 +320,7 @@ impl<'a> Lexer<'a> {
                 return Ok(ret);
             } else if segments_len > prefix.len() {
                 // Prefix does not align with existing segments.
+                log::debug!("Lexer::match_indent Err: mismatch with established indent levels");
                 return Err(());
             }
         }
@@ -332,6 +348,7 @@ impl<'a> Lexer<'a> {
 
             if c != self.indent_char.unwrap_or(c) {
                 // Mismatch!
+                log::debug!("Lexer::witness_indentation_char Err: mixed indentation");
                 return Err(());
             }
 
@@ -343,30 +360,23 @@ impl<'a> Lexer<'a> {
     }
 }
 
-impl<'a> fmt::Debug for Lexer<'a> {
+impl<'a> fmt::Display for Lexer<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // Custom debug formatter that cuts down an over-long input string.
         const MAX_LEN: usize = 72;
-        write!(
-            f,
-            "Lexer {{\n    indent_char: {:?},\n    indent_segments: {:?},\n    input: ",
-            self.indent_char.unwrap_or('\0'),
-            self.indent_segments
-        )?;
+        let s = format!("{:?}", self);
 
-        if self.input.len() > MAX_LEN {
-            let cut_pos = self
-                .input
+        if s.len() > MAX_LEN {
+            let cut_pos = s
                 .char_indices()
                 .take(MAX_LEN - 3)
                 .map(|(i, _)| i)
                 .last()
                 .unwrap_or(0);
-            write!(f, "{:?}", &self.input[0..cut_pos])?;
+            write!(f, "{}...", &s[0..cut_pos])
         } else {
-            write!(f, "{:?}", self.input)?;
+            write!(f, "{}", s)
         }
-        writeln!(f, " }}")
     }
 }
 
@@ -446,6 +456,7 @@ mod parse {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use test_env_log::test;
 
     fn t(input: &str) -> Lexer {
         Lexer::new(input).unwrap()
@@ -474,11 +485,13 @@ mod tests {
     #[test]
     fn lexer_read() {
         assert_eq!(t("a").section(), Ok("a".into()));
-
         assert_eq!(t("a\n  b").section(), Ok("a\n  b".into()));
+        assert_eq!(t("a\n  b\nc").section(), Ok("a\n  b\nc".into()));
 
         let mut lexer = t("a\n  b\nc");
         lexer.enter_body().unwrap();
         assert_eq!(lexer.section(), Ok("a\n  b".into()));
+        assert_eq!(lexer.section(), Ok("c".into()));
+        assert_eq!(lexer.section(), Err(""));
     }
 }
