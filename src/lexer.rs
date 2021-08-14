@@ -1,4 +1,3 @@
-pub type Result<'a, T> = std::result::Result<T, &'a str>;
 use std::fmt;
 
 /// Low-level indented text parsing primitives.
@@ -28,10 +27,11 @@ pub struct Lexer<'a> {
 
     // NB: Keep input as the last field so the tail of the input will be the
     // only thing cut by the abbreviating Display operation.
-
     /// The remaining input to be lexed.
     input: &'a str,
 }
+
+pub type Result<'a, T> = std::result::Result<T, &'a str>;
 
 /// IDM element shape.
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
@@ -39,8 +39,14 @@ pub enum Shape {
     /// No content, for example at EOF.
     Empty,
     /// A section with a headline and body lines.
+    ///
+    /// Will be read as `"a\n  b\n  c"` by `Lexer::read` (all lines after
+    /// the first are indented).
     Section,
     /// A block of body lines without a headline.
+    ///
+    /// Will be read as `"b\nc"` by `Lexer::read` (all of the block lines
+    /// start at zero indentation).
     Block,
     /// A single line with no child lines.
     BodyLine,
@@ -249,18 +255,18 @@ impl<'a> Lexer<'a> {
         Ok(word)
     }
 
-    /// Read section at lexer into string with the indentation up to headline
+    /// Read element at lexer into string with the indentation up to headline
     /// removed for each line.
     ///
     /// If run when there is no headline, only the body is read and
     /// indentation is removed up to body level.
     ///
-    /// Calls to `section` can be very expensive. Try to only call `section`
+    /// Calls to `read` can be very expensive. Try to only call `read`
     /// when you know you want to read the thing at the current point of
     /// input.
-    pub fn section(&mut self) -> Result<String> {
+    pub fn read(&mut self) -> Result<String> {
         let mut ret = String::new();
-        self.read_section(&mut ret)?;
+        self.read_into(&mut ret)?;
         if !ret.is_empty() {
             // Drop trailing newline.
             ret.pop();
@@ -272,13 +278,13 @@ impl<'a> Lexer<'a> {
 // Private methods
 
 impl<'a> Lexer<'a> {
-    /// Read a section into an existing string buffer.
-    fn read_section(&mut self, buffer: &mut String) -> Result<()> {
+    /// Read an element into an existing string buffer.
+    fn read_into(&mut self, buffer: &mut String) -> Result<()> {
         if self.input == "" {
             return Err("");
         }
 
-        // XXX: read_section does not currently validate segment dedent
+        // XXX: read_into does not currently validate segment dedent
         // consistency within the section.
 
         let (current_prefix, _) = parse::indent(self.input)?;
@@ -289,7 +295,7 @@ impl<'a> Lexer<'a> {
             self.match_indent(current_prefix).map_err(|_| self.input)?;
 
         if current_prefix.len() < indent_len {
-            log::debug!("Lexer::read_section Err: out of depth");
+            log::debug!("Lexer::read_into Err: out of depth");
             // Dropped out of depth, no go.
             return Err(self.input);
         }
@@ -545,15 +551,15 @@ mod tests {
 
     #[test]
     fn lexer_read() {
-        assert_eq!(t("a").section(), Ok("a".into()));
-        assert_eq!(t("a\n  b").section(), Ok("a\n  b".into()));
-        assert_eq!(t("a\n  b\nc").section(), Ok("a\n  b\nc".into()));
+        assert_eq!(t("a").read(), Ok("a".into()));
+        assert_eq!(t("a\n  b").read(), Ok("a\n  b".into()));
+        assert_eq!(t("a\n  b\nc").read(), Ok("a\n  b\nc".into()));
 
         let mut lexer = t("a\n  b\nc");
         lexer.enter_body().unwrap();
-        assert_eq!(lexer.section(), Ok("a\n  b".into()));
-        assert_eq!(lexer.section(), Ok("c".into()));
-        assert_eq!(lexer.section(), Err(""));
+        assert_eq!(lexer.read(), Ok("a\n  b".into()));
+        assert_eq!(lexer.read(), Ok("c".into()));
+        assert_eq!(lexer.read(), Err(""));
     }
 
     #[test]
