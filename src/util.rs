@@ -1,3 +1,5 @@
+// REMOVEME: Truncation is baked in Lexer now, not used elsewhere
+
 use std::fmt;
 
 /// Wrapper to truncate possibly very long values into readable prefixes when

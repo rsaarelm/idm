@@ -25,19 +25,18 @@ pub struct Lexer<'a> {
     /// element at the start of the list.
     indent_segments: Vec<usize>,
 
-    // NB: Keep input as the last field so the tail of the input will be the
-    // only thing cut by the abbreviating Display operation.
     /// The remaining input to be lexed.
     input: &'a str,
+
+    /// The original input
+    input_start: &'a str,
 }
 
-pub type Result<'a, T> = std::result::Result<T, &'a str>;
+pub type Result<'a, T> = std::result::Result<T, ()>;
 
 /// IDM element shape.
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub enum Shape {
-    /// No content, for example at EOF.
-    Empty,
     /// A section with a headline and body lines.
     ///
     /// Will be read as `"a\n  b\n  c"` by `Lexer::read` (all lines after
@@ -57,25 +56,31 @@ pub enum Shape {
 
 impl<'a> Lexer<'a> {
     /// Classify the shape at the current lexer position.
-    pub fn classify(&self) -> Shape {
+    pub fn classify(&self) -> Option<Shape> {
         let mut probe = self.clone();
         match probe.enter_body() {
             Ok(None) => {
                 if probe.exit_body().is_err() {
-                    Shape::Block
+                    Some(Shape::Block)
                 } else {
-                    Shape::Empty
+                    None
                 }
             }
             Ok(Some(_)) => {
                 if probe.exit_body().is_err() {
-                    Shape::Section
+                    Some(Shape::Section)
                 } else {
-                    Shape::BodyLine
+                    Some(Shape::BodyLine)
                 }
             }
-            Err(_) => Shape::Empty,
+            Err(_) => None,
         }
+    }
+
+    pub fn exit_words(&mut self) -> Result<()> {
+        self.enter_body()?;
+        self.exit_body()?;
+        Ok(())
     }
 }
 
@@ -85,7 +90,7 @@ impl<'a> Lexer<'a> {
     pub fn new(input: &str) -> Result<Lexer> {
         // First line must have indentation depth 0.
         match parse::indent(input)? {
-            (n, rest) if !n.is_empty() => return Err(rest),
+            (n, rest) if !n.is_empty() => return Err(()),
             _ => {}
         }
 
@@ -93,6 +98,7 @@ impl<'a> Lexer<'a> {
             indent_char: Default::default(),
             indent_segments: Default::default(),
             input,
+            input_start: input,
         })
     }
 
@@ -101,7 +107,7 @@ impl<'a> Lexer<'a> {
         for (i, c) in self.input.char_indices() {
             if !c.is_whitespace() {
                 log::debug!("Lexer::end still has input");
-                return Err(&self.input[i..]);
+                return Err(());
             }
         }
         self.input = "";
@@ -131,21 +137,19 @@ impl<'a> Lexer<'a> {
         // - Can't have headline or body, fail out.
         if self.input == "" {
             log::debug!("Lexer::enter_body at EOF");
-            return Err(self.input);
+            return Err(());
         }
 
         let (current_prefix, _) = parse::indent(self.input)?;
-        let new_segments: Vec<usize> =
-            self.match_indent(current_prefix).map_err(|_| self.input)?;
+        let new_segments: Vec<usize> = self.match_indent(current_prefix)?;
 
         // Current indent is shorter than expected indent.
         // - Can't have headline or body, fail out
         if new_segments.len() < self.indent_segments.len() {
-            return Err(self.input);
+            return Err(());
         }
 
-        self.witness_indentation_char(current_prefix)
-            .map_err(|_| self.input)?;
+        self.witness_indentation_char(current_prefix)?;
 
         // A headline exists if content starts *exactly* at indent string.
         let (line, rest) = parse::line(self.input)?;
@@ -177,8 +181,7 @@ impl<'a> Lexer<'a> {
         self.input = rest;
         //  - Determine indent level for next line
         let (body_prefix, _) = parse::indent(self.input)?;
-        let body_segments =
-            self.match_indent(body_prefix).map_err(|_| self.input)?;
+        let body_segments = self.match_indent(body_prefix)?;
         //  - If next line's indent level is larger than expected, set
         //    expected to that
         //  - Otherwise set expected indent level to synthetic +1 indent
@@ -208,13 +211,12 @@ impl<'a> Lexer<'a> {
     /// Should be cheap to call, feel free to use with cloned lexers.
     pub fn exit_body(&mut self) -> Result<()> {
         let (body_prefix, _) = parse::indent(self.input)?;
-        let body_segments =
-            self.match_indent(body_prefix).map_err(|_| self.input)?;
+        let body_segments = self.match_indent(body_prefix)?;
         if body_segments.len() < self.indent_segments.len() {
             self.dedent();
             Ok(())
         } else {
-            Err(self.input)
+            Err(())
         }
     }
 
@@ -224,12 +226,12 @@ impl<'a> Lexer<'a> {
     /// Failure from `word` does not invalidate the lexer.
     pub fn word(&mut self) -> Result<&str> {
         if self.input == "" {
-            return Err(self.input);
+            return Err(());
         }
 
         let (line, _) = parse::line(self.input)?;
         if line.chars().all(|c| c.is_whitespace()) {
-            return Err(self.input);
+            return Err(());
         }
 
         let mut start_pos = 0;
@@ -261,6 +263,8 @@ impl<'a> Lexer<'a> {
     /// If run when there is no headline, only the body is read and
     /// indentation is removed up to body level.
     ///
+    /// Failure from `read` does not invalidate the lexer.
+    ///
     /// Calls to `read` can be very expensive. Try to only call `read`
     /// when you know you want to read the thing at the current point of
     /// input.
@@ -273,6 +277,17 @@ impl<'a> Lexer<'a> {
         }
         Ok(ret)
     }
+
+    /// Return the line number where the lexer is currently at.
+    pub fn line_number(&self) -> usize {
+        // XXX: Sorta expensive, current assumption is that this is only used
+        // for off-the-happy-path parse error reports. Rewrite to cache the
+        // line number if this ever becomes a bottleneck.
+        let consumed_input =
+            &self.input_start[..self.input_start.len() - self.input.len()];
+
+        1 + consumed_input.chars().filter(|&c| c == '\n').count()
+    }
 }
 
 // Private methods
@@ -281,23 +296,21 @@ impl<'a> Lexer<'a> {
     /// Read an element into an existing string buffer.
     fn read_into(&mut self, buffer: &mut String) -> Result<()> {
         if self.input == "" {
-            return Err("");
+            return Err(());
         }
 
         // XXX: read_into does not currently validate segment dedent
         // consistency within the section.
 
         let (current_prefix, _) = parse::indent(self.input)?;
-        self.witness_indentation_char(current_prefix)
-            .map_err(|_| self.input)?;
+        self.witness_indentation_char(current_prefix)?;
         let indent_len: usize = self.indent_segments.iter().sum();
-        let new_segments: Vec<usize> =
-            self.match_indent(current_prefix).map_err(|_| self.input)?;
+        let new_segments: Vec<usize> = self.match_indent(current_prefix)?;
 
         if current_prefix.len() < indent_len {
             log::debug!("Lexer::read_into Err: out of depth");
             // Dropped out of depth, no go.
-            return Err(self.input);
+            return Err(());
         }
 
         let has_headline = current_prefix.len() == indent_len
@@ -310,8 +323,7 @@ impl<'a> Lexer<'a> {
             // Verify indentation at new level.
             let (line, rest) = parse::line(self.input)?;
             let (indent, _) = parse::indent(self.input)?;
-            self.witness_indentation_char(indent)
-                .map_err(|_| self.input)?;
+            self.witness_indentation_char(indent)?;
 
             if has_headline
                 && !at_headline
@@ -338,9 +350,6 @@ impl<'a> Lexer<'a> {
         Ok(())
     }
 
-    // XXX: Using unit errors because the input &str errors were giving the
-    // borrow checker some trouble over at `enter_body`.
-
     /// Match an indentation prefix with the current indent segment state.
     ///
     /// If the indentation does not match the current input string, either
@@ -348,10 +357,7 @@ impl<'a> Lexer<'a> {
     ///
     /// An indentation at the fake -1 column can only match indentations at
     /// column 0.
-    fn match_indent(
-        &self,
-        prefix: &str,
-    ) -> std::result::Result<Vec<usize>, ()> {
+    fn match_indent(&self, prefix: &str) -> Result<Vec<usize>> {
         // Empty segment is always good.
         if prefix == "" {
             return Ok(vec![0]);
@@ -401,10 +407,7 @@ impl<'a> Lexer<'a> {
     /// Must match an established indentation char. If indentation char has
     /// not been set yet and `indent_prefix` is nonempty, the prefix will be
     /// the char from `indent_prefix` for the rest of the lexer's lifetime.
-    fn witness_indentation_char(
-        &mut self,
-        indent_prefix: &str,
-    ) -> std::result::Result<(), ()> {
+    fn witness_indentation_char(&mut self, indent_prefix: &str) -> Result<()> {
         if let Some(c) = indent_prefix.chars().next() {
             // If this was a public API we'd maybe need a newtype for
             // indent_prefix that takes care of these invariants.
@@ -450,7 +453,7 @@ impl<'a> fmt::Display for Lexer<'a> {
 // Parsing primitives that don't rely on Lexer state.
 
 mod parse {
-    type Result<'a, T> = std::result::Result<(T, &'a str), &'a str>;
+    type Result<'a, T> = std::result::Result<(T, &'a str), ()>;
 
     /// Indentation for any line.
     ///
@@ -491,13 +494,13 @@ mod parse {
                     if c == ' ' || c == '\t' {
                         indent_char = Some(c);
                     } else {
-                        return Err(&input[i..]);
+                        return Err(());
                     }
                 }
                 Some(ic) => {
                     // Mixed indentation detected.
                     if ic != c {
-                        return Err(&input[i..]);
+                        return Err(());
                     }
                 }
             }
@@ -512,7 +515,7 @@ mod parse {
     /// Fails if there is no input.
     pub fn line(input: &str) -> Result<&str> {
         if input == "" {
-            Err(input)
+            Err(())
         } else {
             let p = input.find('\n').unwrap_or(input.len());
             Ok((&input[..p], &input[(p + 1).min(input.len())..]))
@@ -539,7 +542,7 @@ mod tests {
 
     #[test]
     fn lexer_enter_body() {
-        assert_eq!(t("").enter_body(), Err(""));
+        assert_eq!(t("").enter_body(), Err(()));
         // Lexing starts at column -1.
 
         let mut lexer = t("a");
@@ -559,7 +562,7 @@ mod tests {
         lexer.enter_body().unwrap();
         assert_eq!(lexer.read(), Ok("a\n  b".into()));
         assert_eq!(lexer.read(), Ok("c".into()));
-        assert_eq!(lexer.read(), Err(""));
+        assert_eq!(lexer.read(), Err(()));
     }
 
     #[test]
@@ -571,17 +574,41 @@ mod tests {
         assert_eq!(lexer.word(), Ok("a"));
         assert_eq!(lexer.word(), Ok("b"));
         assert_eq!(lexer.word(), Ok("c"));
-        assert_eq!(lexer.word(), Err(""));
+        assert_eq!(lexer.word(), Err(()));
 
         let mut lexer = t("a\nb c");
         assert_eq!(lexer.word(), Ok("a"));
-        assert_eq!(lexer.word(), Err("\nb c"));
+        assert_eq!(lexer.word(), Err(()));
 
         let mut lexer = t("a\n  b c");
         assert_eq!(lexer.enter_body(), Ok(None));
         assert_eq!(lexer.enter_body(), Ok(Some("a")));
         assert_eq!(lexer.word(), Ok("b"));
         assert_eq!(lexer.word(), Ok("c"));
-        assert_eq!(lexer.word(), Err(""));
+        assert_eq!(lexer.word(), Err(()));
+    }
+
+    #[test]
+    fn lexer_dedent() {
+        // The standard dedent usecase, switch from body line reading mode into
+        // block-reading mode in the middle of a struct when you notice you're
+        // out of attribute lines.
+
+        let mut lexer = t("\
+struct
+  a: 1
+  b: 2
+  this
+  is
+  contents");
+        assert_eq!(lexer.enter_body(), Ok(None));
+        assert_eq!(lexer.enter_body(), Ok(Some("struct")));
+        assert_eq!(lexer.read(), Ok("a: 1".into()));
+        assert_eq!(lexer.read(), Ok("b: 2".into()));
+
+        lexer.dedent();
+
+        assert_eq!(lexer.read(), Ok("this\nis\ncontents".into()));
+        assert_eq!(lexer.read(), Err(()));
     }
 }
