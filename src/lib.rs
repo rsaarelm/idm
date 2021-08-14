@@ -9,7 +9,6 @@ pub use error::{Error, Result};
 mod indent_string;
 mod lexer;
 mod outline;
-mod new_parse;
 mod parse;
 
 mod ser;
