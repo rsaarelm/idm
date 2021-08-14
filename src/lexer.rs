@@ -276,6 +276,10 @@ impl<'a> Lexer<'a> {
     pub fn err<T>(&self, msg: impl Into<Cow<'static, str>>) -> Result<T> {
         Err(Error::new(msg).line_num(self.line_num()))
     }
+
+    pub fn input(&self) -> &str {
+        self.input
+    }
 }
 
 // Private methods

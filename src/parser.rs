@@ -6,6 +6,7 @@ use crate::{
 use std::borrow::Cow;
 
 /// IDM parsing state machine.
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Parser<'a> {
     pub mode: ParsingMode,
     pub seq_pos: Option<SequencePos>,
@@ -33,6 +34,16 @@ pub enum ParsingMode {
     DummyKey,
 }
 
+impl ParsingMode {
+    pub fn is_inline(self) -> bool {
+        use ParsingMode::*;
+        match self {
+            Words | Key | DummyKey => true,
+            _ => false,
+        }
+    }
+}
+
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum SequencePos {
     /// Currently parsed sequence is at the first element of a tuple. Special
@@ -46,7 +57,7 @@ pub enum SequencePos {
 // Public methods
 
 impl<'a> Parser<'a> {
-    fn new(input: &'a str) -> Parser<'a> {
+    pub fn new(input: &'a str) -> Parser<'a> {
         let ret = Parser {
             mode: ParsingMode::Block,
             seq_pos: None,
@@ -113,10 +124,144 @@ impl<'a> Parser<'a> {
             }
         }
     }
+
+    pub fn input(&self) -> &str {
+        self.lexer.input()
+    }
+
+    pub fn start_seq(&mut self) -> Result<()> {
+        todo!();
+        /*
+        log::debug!("Cursor::start_seq at {:?}", Trunc(self.input));
+        if !self.can_start_seq() {
+            log::debug!("Cursor::start_seq cannot nest");
+            return self.err("Nested sequence found in inline sequence");
+        }
+
+        match self.classify()? {
+            BodyLine => {
+                log::debug!("Cursor::start_seq starting inline");
+                self.start_words()?;
+            }
+            Block => {
+                log::debug!("Cursor::start_seq starting outline");
+                self.start_block()?;
+            }
+            Section => {
+                log::debug!("Cursor::start_seq section sequence is invalid");
+                return err!(
+                    "start_seq: Section shape not allowed for sequence"
+                );
+            }
+        }
+
+        Ok(())
+        */
+    }
+
+    pub fn start_tuple(&mut self, _len: usize) -> Result<()> {
+        todo!()
+        /*
+        log::debug!("Cursor::start_tuple at {:?}", Trunc(self.input));
+        if !self.can_start_seq() {
+            log::debug!("Cursor::start_tuple cannot nest");
+            return err!("Nested sequence found in inline sequence");
+        }
+
+        match self.classify()? {
+            BodyLine => {
+                log::debug!("Cursor::start_tuple starting inline");
+                self.start_words()?;
+            }
+            Block => {
+                log::debug!("Cursor::start_tuple starting outline");
+                self.start_block()?;
+            }
+            Section => {
+                log::debug!("Cursor::start_tuple starting section");
+                self.start_line()?;
+            }
+        }
+
+        Ok(())
+        */
+    }
+
+    pub fn start_map(&mut self) -> Result<()> {
+        todo!()
+        /*
+        log::debug!("Cursor::start_map at {:?}", Trunc(self.input));
+        if !self.can_start_seq() {
+            return err!("Nested sequence found in inline sequence");
+        }
+
+        self.start_block()
+        */
+    }
+
+    pub fn start_struct(
+        &mut self,
+        _fields: &'static [&'static str],
+    ) -> Result<()> {
+        todo!()
+        /*
+        log::debug!("Cursor::start_struct at {:?}", Trunc(self.input));
+        if !self.can_start_seq() {
+            return err!("Nested sequence found in inline sequence");
+        }
+
+        self.start_block()
+        */
+    }
+
+    pub fn end(&mut self) -> Result<()> {
+        todo!()
+        /*
+        log::debug!("Cursor::end at {:?}", Trunc(self.input));
+        if self.at_end() {
+            Ok(())
+        } else {
+            err!(
+                "Cursor::end: Unparsed trailing input {:?}",
+                Trunc(self.input)
+            )
+        }
+        */
+    }
+
+    pub fn start_block(&mut self) -> Result<()> {
+        todo!()
+    }
+
+    pub fn start_line(&mut self) -> Result<()> {
+        todo!()
+    }
+
+    pub fn start_words(&mut self) -> Result<()> {
+        todo!()
+    }
+
+    pub fn end_block(&mut self) -> Result<()> {
+        todo!()
+    }
+
+    pub fn prepare_for_contents(&mut self) -> Result<()> {
+        todo!()
+    }
+
+    pub fn end_line(&mut self) -> Result<()> {
+        todo!()
+    }
+
+    pub fn key(&mut self) -> Result<String> {
+        todo!()
+    }
 }
 
 // Private methods
 
 impl<'a> Parser<'a> {
-    // TODO
+    fn err<T>(&self, msg: impl Into<Cow<'static, str>>) -> Result<T> {
+        self.lexer.err(msg)
+    }
 }
