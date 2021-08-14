@@ -3,10 +3,10 @@ use std::fmt;
 
 /// Low-level indented text parsing primitives.
 ///
-/// A lexer instance should not be used after it has returned an error from
-/// any of the methods. Use a clone of the main lexer when doing recoverable
-/// probing operations and call primitives on the main lexer when their
-/// failure will fail the entire parse.
+/// A lexer instance generally should not be used after it has returned an
+/// error from one of the methods. Use a clone of the main lexer when doing
+/// recoverable probing operations and call primitives on the main lexer when
+/// their failure will fail the entire parse.
 #[derive(Clone, Eq, PartialEq, Debug)]
 pub struct Lexer<'a> {
     /// Is the indentation based on spaces or tabs.
@@ -32,6 +32,48 @@ pub struct Lexer<'a> {
     /// The remaining input to be lexed.
     input: &'a str,
 }
+
+/// IDM element shape.
+#[derive(Copy, Clone, Eq, PartialEq, Debug)]
+pub enum Shape {
+    /// No content, for example at EOF.
+    Empty,
+    /// A section with a headline and body lines.
+    Section,
+    /// A block of body lines without a headline.
+    Block,
+    /// A single line with no child lines.
+    BodyLine,
+}
+
+// Utility public methods
+// (Implemented in terms of core public methods)
+
+impl<'a> Lexer<'a> {
+    /// Classify the shape at the current lexer position.
+    pub fn classify(&self) -> Shape {
+        let mut probe = self.clone();
+        match probe.enter_body() {
+            Ok(None) => {
+                if probe.exit_body().is_err() {
+                    Shape::Block
+                } else {
+                    Shape::Empty
+                }
+            }
+            Ok(Some(_)) => {
+                if probe.exit_body().is_err() {
+                    Shape::Section
+                } else {
+                    Shape::BodyLine
+                }
+            }
+            Err(_) => Shape::Empty,
+        }
+    }
+}
+
+// Core public methods
 
 impl<'a> Lexer<'a> {
     pub fn new(input: &str) -> Result<Lexer> {
@@ -73,6 +115,10 @@ impl<'a> Lexer<'a> {
     ///
     /// Will fail when there is neither a headline (at depth -1 or indented to
     /// an empty body) nor any body lines.
+    ///
+    /// It should be reasonably cheap to call `enter_body` on an avergae
+    /// input, feel free to use this for probing input with clones of the
+    /// lexer.
     pub fn enter_body(&mut self) -> Result<Option<&'a str>> {
         log::debug!("Hello world");
         // At EOF.
@@ -152,6 +198,8 @@ impl<'a> Lexer<'a> {
 
     /// Pop out of current indented body when there is only white space left
     /// in the body. Will fail if body still has content.
+    ///
+    /// Should be cheap to call, feel free to use with cloned lexers.
     pub fn exit_body(&mut self) -> Result<()> {
         let (body_prefix, _) = parse::indent(self.input)?;
         let body_segments =
@@ -166,6 +214,8 @@ impl<'a> Lexer<'a> {
 
     /// Extract a single word from the current line, move lexer to start of
     /// next word on the same line or end of line, whichever is closest.
+    ///
+    /// Failure from `word` does not invalidate the lexer.
     pub fn word(&mut self) -> Result<&str> {
         if self.input == "" {
             return Err(self.input);
@@ -181,9 +231,8 @@ impl<'a> Lexer<'a> {
         let mut before_word = true;
         for (i, c) in line.char_indices() {
             if before_word {
-                if c.is_whitespace() {
-                    start_pos = i;
-                } else {
+                start_pos = i;
+                if !c.is_whitespace() {
                     before_word = false;
                 }
             } else {
@@ -205,6 +254,10 @@ impl<'a> Lexer<'a> {
     ///
     /// If run when there is no headline, only the body is read and
     /// indentation is removed up to body level.
+    ///
+    /// Calls to `section` can be very expensive. Try to only call `section`
+    /// when you know you want to read the thing at the current point of
+    /// input.
     pub fn section(&mut self) -> Result<String> {
         let mut ret = String::new();
         self.read_section(&mut ret)?;
@@ -241,7 +294,8 @@ impl<'a> Lexer<'a> {
             return Err(self.input);
         }
 
-        let has_headline = current_prefix.len() == indent_len && !self.indent_segments.is_empty();
+        let has_headline = current_prefix.len() == indent_len
+            && !self.indent_segments.is_empty();
 
         // Set to true at start of loop if a headline exists.
         let mut at_headline = has_headline;
@@ -253,7 +307,10 @@ impl<'a> Lexer<'a> {
             self.witness_indentation_char(indent)
                 .map_err(|_| self.input)?;
 
-            if has_headline && !at_headline && indent.len() <= current_prefix.len() {
+            if has_headline
+                && !at_headline
+                && indent.len() <= current_prefix.len()
+            {
                 // End of section, exit.
                 break;
             }
@@ -296,7 +353,9 @@ impl<'a> Lexer<'a> {
 
         // At column -1 it's an error to start with any indent other than 0.
         if self.indent_segments.is_empty() && !prefix.is_empty() {
-            log::debug!("Lexer::match_indent Err: first line has nonzero indent");
+            log::debug!(
+                "Lexer::match_indent Err: first line has nonzero indent"
+            );
             return Err(());
         }
 
@@ -348,7 +407,9 @@ impl<'a> Lexer<'a> {
 
             if c != self.indent_char.unwrap_or(c) {
                 // Mismatch!
-                log::debug!("Lexer::witness_indentation_char Err: mixed indentation");
+                log::debug!(
+                    "Lexer::witness_indentation_char Err: mixed indentation"
+                );
                 return Err(());
             }
 
@@ -493,5 +554,28 @@ mod tests {
         assert_eq!(lexer.section(), Ok("a\n  b".into()));
         assert_eq!(lexer.section(), Ok("c".into()));
         assert_eq!(lexer.section(), Err(""));
+    }
+
+    #[test]
+    fn lexer_words() {
+        assert_eq!(t("a").word(), Ok("a"));
+        assert_eq!(t("a b").word(), Ok("a"));
+
+        let mut lexer = t("a b c");
+        assert_eq!(lexer.word(), Ok("a"));
+        assert_eq!(lexer.word(), Ok("b"));
+        assert_eq!(lexer.word(), Ok("c"));
+        assert_eq!(lexer.word(), Err(""));
+
+        let mut lexer = t("a\nb c");
+        assert_eq!(lexer.word(), Ok("a"));
+        assert_eq!(lexer.word(), Err("\nb c"));
+
+        let mut lexer = t("a\n  b c");
+        assert_eq!(lexer.enter_body(), Ok(None));
+        assert_eq!(lexer.enter_body(), Ok(Some("a")));
+        assert_eq!(lexer.word(), Ok("b"));
+        assert_eq!(lexer.word(), Ok("c"));
+        assert_eq!(lexer.word(), Err(""));
     }
 }
