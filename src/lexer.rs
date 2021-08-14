@@ -1,4 +1,8 @@
-use std::fmt;
+use crate::{
+    err,
+    error::{Error, Result},
+};
+use std::{borrow::Cow, fmt};
 
 /// Low-level indented text parsing primitives.
 ///
@@ -31,8 +35,6 @@ pub struct Lexer<'a> {
     /// The original input
     input_start: &'a str,
 }
-
-pub type Result<'a, T> = std::result::Result<T, ()>;
 
 /// IDM element shape.
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
@@ -87,27 +89,20 @@ impl<'a> Lexer<'a> {
 // Core public methods
 
 impl<'a> Lexer<'a> {
-    pub fn new(input: &str) -> Result<Lexer> {
-        // First line must have indentation depth 0.
-        match parse::indent(input)? {
-            (n, rest) if !n.is_empty() => return Err(()),
-            _ => {}
-        }
-
-        Ok(Lexer {
+    pub fn new(input: &str) -> Lexer {
+        Lexer {
             indent_char: Default::default(),
             indent_segments: Default::default(),
             input,
             input_start: input,
-        })
+        }
     }
 
     /// Succeed if only whitespace remains of input.
     pub fn end(&mut self) -> Result<()> {
         for (i, c) in self.input.char_indices() {
             if !c.is_whitespace() {
-                log::debug!("Lexer::end still has input");
-                return Err(());
+                return self.err("Lexer::end Unparsed input remains");
             }
         }
         self.input = "";
@@ -136,8 +131,7 @@ impl<'a> Lexer<'a> {
         // At EOF.
         // - Can't have headline or body, fail out.
         if self.input == "" {
-            log::debug!("Lexer::enter_body at EOF");
-            return Err(());
+            return self.err("Lexer::enter_body at EOF");
         }
 
         let (current_prefix, _) = parse::indent(self.input)?;
@@ -146,7 +140,7 @@ impl<'a> Lexer<'a> {
         // Current indent is shorter than expected indent.
         // - Can't have headline or body, fail out
         if new_segments.len() < self.indent_segments.len() {
-            return Err(());
+            return self.err("Lexer::enter_body no content");
         }
 
         self.witness_indentation_char(current_prefix)?;
@@ -216,7 +210,7 @@ impl<'a> Lexer<'a> {
             self.dedent();
             Ok(())
         } else {
-            Err(())
+            self.err("Lexer::exit_body Unparsed input remains")
         }
     }
 
@@ -226,12 +220,12 @@ impl<'a> Lexer<'a> {
     /// Failure from `word` does not invalidate the lexer.
     pub fn word(&mut self) -> Result<&str> {
         if self.input == "" {
-            return Err(());
+            return self.err("Lexer::word At EOF");
         }
 
         let (line, _) = parse::line(self.input)?;
         if line.chars().all(|c| c.is_whitespace()) {
-            return Err(());
+            return self.err("Lexer::word No more words on line");
         }
 
         let mut start_pos = 0;
@@ -278,8 +272,21 @@ impl<'a> Lexer<'a> {
         Ok(ret)
     }
 
+    /// Attach line number to error message.
+    pub fn err<T>(&self, msg: impl Into<Cow<'static, str>>) -> Result<T> {
+        Err(Error::new(msg).line_num(self.line_num()))
+    }
+}
+
+// Private methods
+
+impl<'a> Lexer<'a> {
+    fn numerize<'b>(&'b self) -> impl FnOnce(Error) -> Error + 'b {
+        move |e| e.line_num(self.line_num())
+    }
+
     /// Return the line number where the lexer is currently at.
-    pub fn line_number(&self) -> usize {
+    pub fn line_num(&self) -> usize {
         // XXX: Sorta expensive, current assumption is that this is only used
         // for off-the-happy-path parse error reports. Rewrite to cache the
         // line number if this ever becomes a bottleneck.
@@ -288,29 +295,24 @@ impl<'a> Lexer<'a> {
 
         1 + consumed_input.chars().filter(|&c| c == '\n').count()
     }
-}
 
-// Private methods
-
-impl<'a> Lexer<'a> {
     /// Read an element into an existing string buffer.
     fn read_into(&mut self, buffer: &mut String) -> Result<()> {
         if self.input == "" {
-            return Err(());
+            return self.err("Lexer::read_into at EOF");
         }
 
         // XXX: read_into does not currently validate segment dedent
         // consistency within the section.
 
-        let (current_prefix, _) = parse::indent(self.input)?;
+        let (current_prefix, _) =
+            parse::indent(self.input).map_err(self.numerize())?;
         self.witness_indentation_char(current_prefix)?;
         let indent_len: usize = self.indent_segments.iter().sum();
         let new_segments: Vec<usize> = self.match_indent(current_prefix)?;
 
         if current_prefix.len() < indent_len {
-            log::debug!("Lexer::read_into Err: out of depth");
-            // Dropped out of depth, no go.
-            return Err(());
+            return self.err("Lexer::read_into out of depth");
         }
 
         let has_headline = current_prefix.len() == indent_len
@@ -321,8 +323,10 @@ impl<'a> Lexer<'a> {
 
         while self.input != "" {
             // Verify indentation at new level.
-            let (line, rest) = parse::line(self.input)?;
-            let (indent, _) = parse::indent(self.input)?;
+            let (line, rest) =
+                parse::line(self.input).map_err(self.numerize())?;
+            let (indent, _) =
+                parse::indent(self.input).map_err(self.numerize())?;
             self.witness_indentation_char(indent)?;
 
             if has_headline
@@ -365,10 +369,8 @@ impl<'a> Lexer<'a> {
 
         // At column -1 it's an error to start with any indent other than 0.
         if self.indent_segments.is_empty() && !prefix.is_empty() {
-            log::debug!(
-                "Lexer::match_indent Err: first line has nonzero indent"
-            );
-            return Err(());
+            return self
+                .err("Lexer::match_indent First line has nonzero indent");
         }
 
         // Must be good to unwrap since we've already handled the empty string
@@ -376,9 +378,7 @@ impl<'a> Lexer<'a> {
         let indent_char = prefix.chars().next().unwrap();
         debug_assert!(prefix.chars().all(|c| c == indent_char));
         if indent_char != self.indent_char.unwrap_or(indent_char) {
-            log::debug!("Lexer::match_indent Err: mixed indentation detected");
-            // Mixed indentation, fail.
-            return Err(());
+            return self.err("Lexer::match_indent Mixed indentation detected");
         }
 
         let mut ret = Vec::new();
@@ -391,8 +391,7 @@ impl<'a> Lexer<'a> {
                 return Ok(ret);
             } else if segments_len > prefix.len() {
                 // Prefix does not align with existing segments.
-                log::debug!("Lexer::match_indent Err: mismatch with established indent levels");
-                return Err(());
+                return self.err("Lexer::match_indent Mismatch with established indent levels");
             }
         }
 
@@ -416,10 +415,8 @@ impl<'a> Lexer<'a> {
 
             if c != self.indent_char.unwrap_or(c) {
                 // Mismatch!
-                log::debug!(
-                    "Lexer::witness_indentation_char Err: mixed indentation"
-                );
-                return Err(());
+                return self
+                    .err("Lexer::witness_indentation_char Mixed indentation");
             }
 
             self.indent_char = Some(c);
@@ -453,7 +450,8 @@ impl<'a> fmt::Display for Lexer<'a> {
 // Parsing primitives that don't rely on Lexer state.
 
 mod parse {
-    type Result<'a, T> = std::result::Result<(T, &'a str), ()>;
+    use crate::{err, error::Error};
+    type Result<'a, T> = std::result::Result<(T, &'a str), Error>;
 
     /// Indentation for any line.
     ///
@@ -494,13 +492,13 @@ mod parse {
                     if c == ' ' || c == '\t' {
                         indent_char = Some(c);
                     } else {
-                        return Err(());
+                        return err!("parse::line_indent Invalid indent char");
                     }
                 }
                 Some(ic) => {
                     // Mixed indentation detected.
                     if ic != c {
-                        return Err(());
+                        return err!("parse::line_indent Mixed indentation");
                     }
                 }
             }
@@ -515,7 +513,7 @@ mod parse {
     /// Fails if there is no input.
     pub fn line(input: &str) -> Result<&str> {
         if input == "" {
-            Err(())
+            err!("parse::line at EOF")
         } else {
             let p = input.find('\n').unwrap_or(input.len());
             Ok((&input[..p], &input[(p + 1).min(input.len())..]))
@@ -529,7 +527,7 @@ mod tests {
     use test_env_log::test;
 
     fn t(input: &str) -> Lexer {
-        Lexer::new(input).unwrap()
+        Lexer::new(input)
     }
 
     #[test]
@@ -542,7 +540,7 @@ mod tests {
 
     #[test]
     fn lexer_enter_body() {
-        assert_eq!(t("").enter_body(), Err(()));
+        assert!(t("").enter_body().is_err());
         // Lexing starts at column -1.
 
         let mut lexer = t("a");
@@ -562,7 +560,7 @@ mod tests {
         lexer.enter_body().unwrap();
         assert_eq!(lexer.read(), Ok("a\n  b".into()));
         assert_eq!(lexer.read(), Ok("c".into()));
-        assert_eq!(lexer.read(), Err(()));
+        assert!(lexer.read().is_err());
     }
 
     #[test]
@@ -574,18 +572,18 @@ mod tests {
         assert_eq!(lexer.word(), Ok("a"));
         assert_eq!(lexer.word(), Ok("b"));
         assert_eq!(lexer.word(), Ok("c"));
-        assert_eq!(lexer.word(), Err(()));
+        assert!(lexer.word().is_err());
 
         let mut lexer = t("a\nb c");
         assert_eq!(lexer.word(), Ok("a"));
-        assert_eq!(lexer.word(), Err(()));
+        assert!(lexer.word().is_err());
 
         let mut lexer = t("a\n  b c");
         assert_eq!(lexer.enter_body(), Ok(None));
         assert_eq!(lexer.enter_body(), Ok(Some("a")));
         assert_eq!(lexer.word(), Ok("b"));
         assert_eq!(lexer.word(), Ok("c"));
-        assert_eq!(lexer.word(), Err(()));
+        assert!(lexer.word().is_err());
     }
 
     #[test]
@@ -609,6 +607,6 @@ struct
         lexer.dedent();
 
         assert_eq!(lexer.read(), Ok("this\nis\ncontents".into()));
-        assert_eq!(lexer.read(), Err(()));
+        assert!(lexer.read().is_err());
     }
 }

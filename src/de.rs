@@ -35,7 +35,7 @@ impl<'de> Deserializer<'de> {
         self.cursor
             .next_token()?
             .parse()
-            .map_err(|_| Error(format!("Token parse failed")))
+            .map_err(|_| Error::new("Token parse failed"))
     }
 
     /// Ok when there is no more non-whitespace input left
@@ -500,10 +500,10 @@ impl<'a, 'de> de::MapAccess<'de> for Sequence<'a, 'de> {
     }
 }
 
-/// Cursor checkpointing support structure
+/// State checkpointing support structure
 ///
 /// For handling the hacky bit where parsing may need to back down when
-/// encountering `Option` values.
+/// encountering a canonical outline value.
 #[derive(Clone, Default)]
 struct Checkpoint<'a> {
     /// Saved cursor and new input position at which checkpoint was saved.

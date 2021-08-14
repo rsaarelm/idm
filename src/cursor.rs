@@ -208,7 +208,10 @@ impl<'a> Cursor<'a> {
         if self.at_end() {
             Ok(())
         } else {
-            err!("Cursor::end: Unparsed trailing input {:?}", Trunc(self.input))
+            err!(
+                "Cursor::end: Unparsed trailing input {:?}",
+                Trunc(self.input)
+            )
         }
     }
 
@@ -329,10 +332,7 @@ impl<'a> Cursor<'a> {
     pub fn start_words(&mut self) -> Result<()> {
         log::debug!("Cursor::start_words at {:?}", Trunc(self.input));
         let indent = self.current_indent.clone();
-        self.parse(
-            |input| indent.parse(input),
-            "start_words: Invalid indent",
-        )?;
+        self.parse(|input| indent.parse(input), "start_words: Invalid indent")?;
         self.mode = ParsingMode::Words;
         Ok(())
     }
@@ -425,7 +425,11 @@ impl<'a> Cursor<'a> {
             }
             Err(rest) => {
                 self.consume_to(rest);
-                Err(Error(format!("{}: {}", self.line_number.max(1), err_msg)))
+                Err(Error::new(format!(
+                    "{}: {}",
+                    self.line_number.max(1),
+                    err_msg
+                )))
             }
         }
     }
@@ -452,7 +456,7 @@ impl<'a> Cursor<'a> {
                     .filter(|&c| c == '\n')
                     .count() as i32;
 
-            Error(format!("{}: {}", line_number, msg))
+            Error::new(format!("{}: {}", line_number, msg))
         }
     }
 

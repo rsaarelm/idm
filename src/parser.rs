@@ -46,16 +46,14 @@ pub enum SequencePos {
 // Public methods
 
 impl<'a> Parser<'a> {
-    fn new(input: &'a str) -> Result<Parser<'a>> {
-        let lexer =
-            Lexer::new(input).map_err(|_| Error("Invalid input".into()))?;
+    fn new(input: &'a str) -> Parser<'a> {
         let ret = Parser {
             mode: ParsingMode::Block,
             seq_pos: None,
-            lexer,
+            lexer: Lexer::new(input),
         };
         log::debug!("\x1b[1;32mParser::new: {}\x1b[0m", ret.lexer);
-        Ok(ret)
+        ret
     }
 
     /// Return true if the cursor can enter a new sequence from the current
@@ -82,29 +80,21 @@ impl<'a> Parser<'a> {
         log::debug!("Parser::next_token at {}", self.lexer);
 
         match self.mode {
-            Block => Ok(Cow::from(
-                self.lexer
-                    .read()
-                    .map_err(self.err("next_token failed to read block"))?,
-            )),
+            Block => Ok(Cow::from(self.lexer.read()?)),
             Line => {
-                if let Some(headline) = self
-                    .lexer
-                    .enter_body()
-                    .map_err(self.err("next_toknen failed to enter body"))?
-                {
+                if let Some(headline) = self.lexer.enter_body()? {
                     self.mode = Block;
                     Ok(Cow::from(headline))
                 } else {
-                    return err!("next_token: No headline for Line mode");
+                    return self
+                        .lexer
+                        .err("Parser::next_token: No headline for Line mode");
                 }
             }
-            Words => {
-                match self.lexer.word() {
-                    Err(_) => err!("next_token failed to read word"),
-                    Ok(word) => Ok(Cow::from(word))
-                }
-            }
+            Words => match self.lexer.word() {
+                Err(_) => err!("next_token failed to read word"),
+                Ok(word) => Ok(Cow::from(word)),
+            },
             Key => {
                 todo!();
                 /*
@@ -128,10 +118,5 @@ impl<'a> Parser<'a> {
 // Private methods
 
 impl<'a> Parser<'a> {
-    /// Standalone error formatter.
-    fn err<'b>(&'b self, msg: &'b str) -> impl Fn(()) -> Error + 'b {
-        move |remaining_input| {
-            Error(format!("{}: {}", self.lexer.line_number(), msg))
-        }
-    }
+    // TODO
 }
