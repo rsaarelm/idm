@@ -8,9 +8,12 @@ description = "Implicit Data Markup"
 categories = ["encoding"]
 
 [dependencies]
+log = "0.4"
 paste = "1"
 serde = "1"
 serde_derive = "1"
 
 [dev-dependencies]
+env_logger = "0.9"
 pretty_assertions = "0.7"
+test-env-log = "0.2"
