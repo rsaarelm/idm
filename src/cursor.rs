@@ -60,6 +60,10 @@ impl<'a> Cursor<'a> {
         }
     }
 
+    pub fn input(&self) -> &str {
+        self.input
+    }
+
     pub fn has_headline(&self, depth: i32) -> bool {
         self.clone().headline(depth).ok().is_some()
     }

@@ -1,4 +1,4 @@
-use crate::cursor::Cursor;
+use crate::{cursor::Cursor, lexer::Lexer};
 use crate::{err, Error, Result};
 use paste::paste;
 use serde::de;
@@ -77,6 +77,7 @@ pub struct Deserializer<'de> {
     seq_pos: Option<SequencePos>,
     // Hacky hack hack to support tuples with Option first field
     delayed_enter_body_requested: bool,
+    checkpoint: Checkpoint<'de>,
 }
 
 impl<'de> Deserializer<'de> {
@@ -90,6 +91,7 @@ impl<'de> Deserializer<'de> {
             mode: ParsingMode::Block(true),
             seq_pos: None,
             delayed_enter_body_requested: false,
+            checkpoint: Default::default(),
         }
     }
 
@@ -147,9 +149,7 @@ impl<'de> Deserializer<'de> {
                     Ok(Cow::from(line))
                 }
             }
-            Line(false) => {
-                Ok(Cow::from(self.cursor.line()?))
-            }
+            Line(false) => Ok(Cow::from(self.cursor.line()?)),
             Word => Ok(Cow::from(self.cursor.word()?)),
             Key(emit_dummy_key) => {
                 let key = if emit_dummy_key {
@@ -769,5 +769,50 @@ impl<'a, 'de> de::MapAccess<'de> for Sequence<'a, 'de> {
             self.de.exit_body()?;
         }
         ret
+    }
+}
+
+/// State checkpointing support structure
+///
+/// For handling the hacky bit where parsing may need to back down when
+/// encountering a canonical outline value.
+#[derive(Clone, Default)]
+struct Checkpoint<'a> {
+    /// Saved state and new input position at which checkpoint was saved.
+    span: Option<(Lexer<'a>, &'a str)>,
+}
+
+impl<'a> Checkpoint<'a> {
+    pub fn save(&mut self, old_state: Lexer<'a>, new_pos: &'a str) {
+        // Are we encoding an actual skip
+        let did_skip = new_pos != old_state.input();
+        let seen_position =
+            self.span.as_ref().map_or(false, |(_, pos)| *pos == new_pos);
+
+        // If a skip happened, the position should be something we haven't
+        // encountered.
+        debug_assert!(!did_skip || !seen_position);
+
+        if seen_position {
+            // We already stored a jump to this position, do not munge
+            // checkpoint with a no-length jump
+            log::debug!("Checkpoint::save: At known position, doing nothing");
+            return;
+        } else if did_skip {
+            log::debug!("Checkpoint::save: Saving state");
+            self.span = Some((old_state, new_pos));
+        } else {
+            // Entered a new position, but there's no skip to back over,
+            // turn checkpoint into no-op.
+            log::debug!("Checkpoint::save: No skip, clearing checkpoint");
+            self.span = None;
+        }
+    }
+
+    pub fn restore(&mut self, state: &mut Lexer<'a>) {
+        if let Some((old_state, _)) = std::mem::replace(&mut self.span, None) {
+            log::debug!("Checkpoint::restore: Restoring earlier state");
+            *state = old_state;
+        }
     }
 }
