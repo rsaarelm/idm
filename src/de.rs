@@ -96,7 +96,7 @@ impl<'de> Deserializer<'de> {
     fn parse_next<T: FromStr>(&mut self) -> Result<T> {
         self.next_token()?
             .parse()
-            .map_err(|_| Error(format!("Token parse failed")))
+            .map_err(|_| Error::new("Token parse failed"))
     }
 
     fn has_next_token(&mut self) -> bool {
