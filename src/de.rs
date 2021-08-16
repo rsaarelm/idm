@@ -1,4 +1,4 @@
-use crate::{err, lexer::Lexer, Error, Result};
+use crate::{err, lexer::Lexer, lexer::Shape, Error, Result};
 use paste::paste;
 use serde::de;
 use std::{borrow::Cow, collections::HashSet, str::FromStr};
@@ -86,27 +86,8 @@ impl<'de> Deserializer<'de> {
     }
 
     fn has_next_token(&mut self) -> bool {
-        todo!();
-        /*
-        use ParsingMode::*;
-        match self.mode {
-            Block(escape_commas) => {
-                let has_headline = if escape_commas {
-                    self.cursor.has_headline(self.current_depth)
-                } else {
-                    self.cursor.has_remaining_line(self.current_depth)
-                };
-                self.cursor
-                    .line_depth()
-                    .map_or(true, |n| n >= self.current_depth)
-                    && (has_headline
-                        || self.cursor.has_body_content(self.current_depth))
-            }
-            Line(_) | Word | Key(_) => {
-                self.cursor.has_headline_content(self.current_depth)
-            }
-        }
-        */
+        // XXX: Unoptimized, does extra work that gets thrown out.
+        self.clone().next_token().is_ok()
     }
 
     /// Consume the next atomic parsing element as string according to current
@@ -138,6 +119,18 @@ impl<'de> Deserializer<'de> {
 
     pub fn end(&mut self) -> Result<()> {
         self.lexer.end()
+    }
+
+    fn verify_seq_startable(&self) -> Result<()> {
+        match self.mode {
+            ParsingMode::Line
+            | ParsingMode::Word
+            | ParsingMode::Key
+            | ParsingMode::DummyKey => {
+                err!("Nested sequence found in inline sequence")
+            }
+            _ => Ok(()),
+        }
     }
 }
 
@@ -282,19 +275,8 @@ impl<'a, 'de> de::Deserializer<'de> for &'a mut Deserializer<'de> {
     where
         V: de::Visitor<'de>,
     {
-        todo!();
-        /*
-        if self.delayed_enter_body_requested {
-            self.enter_body()?;
-            self.delayed_enter_body_requested = false;
-        }
-
-        match self.mode {
-            ParsingMode::Line(_) | ParsingMode::Word | ParsingMode::Key(_) => {
-                return err!("Nested sequence found in inline sequence");
-            }
-            _ => {}
-        }
+        use Shape::*;
+        self.verify_seq_startable()?;
 
         // NB: Merging is only supported for variable-length seqs, not tuples.
         // It would mess up tuple/fixed-width-array matrices otherwise.
@@ -306,59 +288,53 @@ impl<'a, 'de> de::Deserializer<'de> for &'a mut Deserializer<'de> {
             return visitor.visit_seq(Sequence::new(self).merged());
         }
 
-        let is_inline = self.cursor.has_headline_content(self.current_depth);
-        let is_outline = self.cursor.has_body_content(self.current_depth);
-        if is_inline && is_outline {
-            return err!("Sequence has both headline and body");
+        match self.lexer.classify() {
+            None => return err!("deserialize_seq: EOF"),
+            Some(Section(headline)) => {
+                if !headline.starts_with("--") {
+                    return err!("deserialize_seq: Both headline and body");
+                } else {
+                    self.mode = ParsingMode::Block;
+                    self.lexer.enter_body()?;
+                }
+            }
+            Some(Block) => {
+                self.mode = ParsingMode::Block;
+                self.lexer.enter_body()?;
+            }
+            Some(BodyLine(_)) => {
+                self.mode = ParsingMode::Word;
+            }
         }
-
-        if is_inline {
-            self.mode = ParsingMode::Word;
-        } else {
-            self.mode = ParsingMode::Block(true);
-            self.enter_body()?;
-        }
-
         visitor.visit_seq(Sequence::new(self))
-        */
     }
 
-    fn deserialize_tuple<V>(self, len: usize, visitor: V) -> Result<V::Value>
+    fn deserialize_tuple<V>(mut self, len: usize, visitor: V) -> Result<V::Value>
     where
         V: de::Visitor<'de>,
     {
-        todo!();
-        /*
-        if self.delayed_enter_body_requested {
-            self.enter_body()?;
-            self.delayed_enter_body_requested = false;
-        }
+        use Shape::*;
+        self.verify_seq_startable()?;
 
-        match self.mode {
-            ParsingMode::Line(_) | ParsingMode::Word | ParsingMode::Key(_) => {
-                return err!("Nested sequence in inline sequence");
+        match self.lexer.classify() {
+            None => return err!("deserialize_tuple: EOF"),
+            Some(Section(headline)) => {
+                if !headline.starts_with("--") {
+                    self.mode = ParsingMode::Line;
+                } else {
+                    self.mode = ParsingMode::Block;
+                    self.lexer.enter_body()?;
+                }
             }
-            _ => {}
+            Some(Block) => {
+                self.mode = ParsingMode::Block;
+                self.lexer.enter_body()?;
+            }
+            Some(BodyLine(_)) => {
+                self.mode = ParsingMode::Word;
+            }
         }
-
-        let is_inline = self.cursor.has_headline_content(self.current_depth);
-        let is_outline = self.cursor.has_body_content(self.current_depth);
-
-        if is_inline && !is_outline {
-            self.mode = ParsingMode::Word;
-        } else if !is_inline && is_outline {
-            self.mode = ParsingMode::Block(true);
-        // Can't enter body yet, because if the first field turns out to
-        // be Option, we need to backtrack into Line mode.
-        //
-        // The flag for deferred body entering will be flipped in
-        // next_element_seed.
-        } else {
-            self.mode = ParsingMode::Line(false);
-        }
-
         visitor.visit_seq(Sequence::new(self).tuple_length(len))
-        */
     }
 
     fn deserialize_tuple_struct<V>(
@@ -488,6 +464,19 @@ impl<'a, 'de> Sequence<'a, 'de> {
         self.struct_fields = fields.into_iter().map(|&x| x).collect();
         self
     }
+
+    fn exit(&mut self) -> Result<()> {
+        if self.de.mode.is_inline() {
+            self.de.lexer.exit_words()?;
+        } else {
+            if !self.is_merged {
+                self.de.lexer.exit_body()?;
+            }
+        }
+        self.de.mode = ParsingMode::Block;
+        self.de.seq_pos = None;
+        Ok(())
+    }
 }
 
 impl<'a, 'de> de::SeqAccess<'de> for Sequence<'a, 'de> {
@@ -497,8 +486,6 @@ impl<'a, 'de> de::SeqAccess<'de> for Sequence<'a, 'de> {
     where
         T: de::DeserializeSeed<'de>,
     {
-        todo!();
-        /*
         // Set marker for first or last position of tuple, special parsing
         // rules are in effect in these.
         if self.tuple_length.is_some() && self.idx == 0 {
@@ -509,14 +496,26 @@ impl<'a, 'de> de::SeqAccess<'de> for Sequence<'a, 'de> {
             self.de.seq_pos = None;
         }
 
-        // Tuples are parsed up to their known number of elements.
-        // Other sequences are parsed until tokens run out.
-        let elements_remain = match self.tuple_length {
-            Some(x) => x > self.idx,
-            None => self.de.has_next_token(),
-        };
+        if self.tuple_length.is_none() && !self.de.has_next_token() {
+            self.exit()?;
+            return Ok(None);
+        }
 
-        if elements_remain {
+        let ret = seed.deserialize(&mut *self.de).map(Some);
+        self.idx += 1;
+
+        if let Some(len) = self.tuple_length {
+            // At tuple end, we need to exit without extra probing.
+            // Serde knows the tuple is ended and won't be calling
+            // next_element_seed again.
+            if self.idx == len {
+                self.exit()?;
+            }
+        }
+
+        ret
+
+        /*
             // If the first element of tuple is Option type, it may look like
             // there's no next token. So always try to deserialize at tuple
             // start.
@@ -585,19 +584,6 @@ impl<'a, 'de> de::SeqAccess<'de> for Sequence<'a, 'de> {
             }
 
             ret
-        } else {
-            // Exit when not finding more elements.
-            if self.de.mode.is_inline() {
-                self.de.exit_line()?;
-            } else {
-                if !self.is_merged {
-                    self.de.exit_body()?;
-                }
-            }
-            self.de.mode = ParsingMode::Block(true);
-            self.de.seq_pos = None;
-            Ok(None)
-        }
         */
     }
 }
