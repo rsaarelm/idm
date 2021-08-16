@@ -28,10 +28,9 @@ enum ParsingMode {
     ///
     /// The colon is removed and the symbol is changed from kebab-case to
     /// camel_case when parsing.
-    ///
-    /// If the magic flag is set, emit '_contents' instead of parsing
-    /// anything.
-    Key(bool),
+    Key,
+    /// Like `Key`, but parses nothing and emits the `_contents` special key.
+    DummyKey,
 }
 
 impl ParsingMode {
@@ -46,7 +45,7 @@ impl ParsingMode {
     fn is_inline(self) -> bool {
         use ParsingMode::*;
         match self {
-            Word | Key(_) => true,
+            Word | Key | DummyKey => true,
             _ => false,
         }
     }
@@ -116,47 +115,25 @@ impl<'de> Deserializer<'de> {
     /// This can be very expensive, it can read a whole file, so only use it
     /// when you know you need it.
     fn next_token(&mut self) -> Result<Cow<str>> {
-        todo!();
-        /*
-        if self.delayed_enter_body_requested {
-            self.enter_body()?;
-            self.delayed_enter_body_requested = false;
-        }
-
         use ParsingMode::*;
         match self.mode {
-            Block(escape_comma) => {
-                let block = self
-                    .cursor
-                    .line_or_block(self.current_depth, escape_comma)?;
-                Ok(Cow::from(block))
-            }
-            Line(true) => {
-                let line = self.cursor.line()?;
-                if !line.is_empty() && line.chars().all(|c| c == ',') {
-                    Ok(Cow::from(&line[1..]))
+            Block => Ok(Cow::from(self.lexer.read()?)),
+            Line => {
+                if let Some(head) = self.lexer.enter_body()? {
+                    self.mode = Block;
+                    Ok(Cow::from(head))
                 } else {
-                    Ok(Cow::from(line))
+                    return err!("next_token No line");
                 }
             }
-            Line(false) => Ok(Cow::from(self.cursor.line()?)),
-            Word => Ok(Cow::from(self.cursor.word()?)),
-            Key(emit_dummy_key) => {
-                let key = if emit_dummy_key {
-                    Ok("_contents".into())
-                } else {
-                    self.cursor.key()
-                };
-                // Keys are always a one-shot parse.
-                //
-                // Set block mode to not escaping commas, since the "headline"
-                // will be on the already prefixed by the key line as the key
-                // instead of on its own line and there
-                self.mode = Block(false);
-                Ok(Cow::from(key?))
+            Word => Ok(Cow::from(self.lexer.word()?)),
+            Key => Ok(Cow::from(self.lexer.key()?)),
+            DummyKey => {
+                self.mode = Block;
+                self.lexer.dedent();
+                Ok(Cow::from("_contents"))
             }
         }
-        */
     }
 
     pub fn end(&mut self) -> Result<()> {
