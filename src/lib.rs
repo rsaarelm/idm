@@ -1,5 +1,3 @@
-mod cursor;
-
 mod de;
 pub use de::{from_str, Deserializer};
 
