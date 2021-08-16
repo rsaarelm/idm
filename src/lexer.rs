@@ -91,6 +91,25 @@ impl<'a> Lexer<'a> {
         self.exit_body()?;
         Ok(())
     }
+
+    /// Parse struct key
+    pub fn key(&mut self) -> Result<String> {
+        if self.inline_input.is_some() {
+            return self.err("Lexer::key Key must be at start of line");
+        }
+
+        // Read word, convert from kebab-case to camel_case.
+        let mut word = self.word()?.replace("-", "_");
+
+        if !word.ends_with(":") || word == ":" {
+            return self.err(format!("Lexer::key invalid key {:?}", word));
+        }
+
+        // Remove the trailing :
+        word.pop();
+
+        Ok(word)
+    }
 }
 
 // Core public methods
@@ -712,7 +731,7 @@ struct
     }
 
     #[test]
-    fn lexer_test_end_with_words() {
+    fn lexer_end_with_words() {
         // Baseline.
         assert!(t("a").end().is_err());
         assert!(t("").end().is_ok());
@@ -735,5 +754,21 @@ struct
         lexer.enter_body().unwrap();
         lexer.word().unwrap();
         assert!(lexer.end().is_ok());
+    }
+
+    #[test]
+    fn lexer_key() {
+        assert!(t("").key().is_err());
+        assert!(t("a").key().is_err());
+        assert!(t(":").key().is_err());
+
+        assert_eq!(t("a:").key(), Ok("a".into()));
+        assert_eq!(t("xyzzy:").key(), Ok("xyzzy".into()));
+        assert_eq!(t("foo-bar:").key(), Ok("foo_bar".into()));
+
+        let mut lexer = t("a bad:");
+        assert_eq!(lexer.word(), Ok("a"));
+        // Fail if key is not at start of line.
+        assert!(lexer.key().is_err());
     }
 }
