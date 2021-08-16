@@ -41,19 +41,23 @@ pub struct Lexer<'a> {
 
 /// IDM element shape.
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
-pub enum Shape {
+pub enum Shape<'a> {
     /// A section with a headline and body lines.
     ///
     /// Will be read as `"a\n  b\n  c"` by `Lexer::read` (all lines after
     /// the first are indented).
-    Section,
+    ///
+    /// The value contains the headline of the section.
+    Section(&'a str),
     /// A block of body lines without a headline.
     ///
     /// Will be read as `"b\nc"` by `Lexer::read` (all of the block lines
     /// start at zero indentation).
     Block,
     /// A single line with no child lines.
-    BodyLine,
+    ///
+    /// Contains the line contents.
+    BodyLine(&'a str),
 }
 
 // Utility public methods
@@ -71,11 +75,11 @@ impl<'a> Lexer<'a> {
                     None
                 }
             }
-            Ok(Some(_)) => {
+            Ok(Some(content)) => {
                 if probe.exit_body().is_err() {
-                    Some(Shape::Section)
+                    Some(Shape::Section(content))
                 } else {
-                    Some(Shape::BodyLine)
+                    Some(Shape::BodyLine(content))
                 }
             }
             Err(_) => None,
