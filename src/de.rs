@@ -521,6 +521,28 @@ impl<'a, 'de> de::SeqAccess<'de> for Sequence<'a, 'de> {
             self.de.seq_pos = None;
         }
 
+        // Consume comments and blanks in outline mode.
+        if !self.de.mode.is_inline() {
+            loop {
+                if let Some(cls) = self.de.lexer.classify() {
+                    if cls.is_blank() {
+                        self.de.lexer.skip()?;
+                    } else if cls.is_standalone_comment() {
+                        self.de.lexer.skip()?;
+                    } else if cls.has_comment_head() {
+                        // Consume headline, set things in block mode.
+                        self.de.lexer.enter_body()?;
+                        self.de.lexer.dedent();
+                        break;
+                    } else {
+                        break;
+                    }
+                } else {
+                    break;
+                }
+            }
+        }
+
         if self.tuple_length.is_none() && !self.de.has_next_token() {
             log::debug!("next_element_seed: Out of sequence elements");
             self.exit()?;
@@ -545,77 +567,6 @@ impl<'a, 'de> de::SeqAccess<'de> for Sequence<'a, 'de> {
         }
 
         ret
-
-        /*
-            // If the first element of tuple is Option type, it may look like
-            // there's no next token. So always try to deserialize at tuple
-            // start.
-
-            // Enter body needs to be deferred up to token-reading for tuples
-            // so that Option head value can cancel the deferral.
-            if self.tuple_length.is_some()
-                && self.idx == 0
-                && self.de.mode.is_block()
-            {
-                self.de.delayed_enter_body_requested = true;
-            }
-            let ret = seed.deserialize(&mut *self.de).map(Some);
-            // Just to be safe.
-            self.de.delayed_enter_body_requested = false;
-
-            // Only ever parse the first item in Line mode, dive in and start
-            // doing block from then on.
-            if let ParsingMode::Line(_) = self.de.mode {
-                self.de.mode = ParsingMode::Block(true);
-
-                if self.de.cursor.at_empty_line() {
-                    // Enter body would consume an empty line as headline.
-                    // Make it the contents of the next step instead.
-                    self.de.current_depth += 1;
-                } else if self
-                    .de
-                    .cursor
-                    .clone()
-                    .verbatim_line(self.de.current_depth)
-                    == Ok(",")
-                {
-                    // Enter body would also consume the empty headline
-                    // marker, so another early exit condition here.
-                    // XXX: This is another bit of ugly special cases...
-                    self.de.current_depth += 1;
-                } else if let Err(_) = self.de.enter_body() {
-                    // We were forced here because of being in a tuple, but
-                    // there's no actual body left, the tuple element will be
-                    // empty. Skip trying to enter the body and just increment
-                    // the depth.
-                    //
-                    // XXX: This relies in enter_body not performing mutations
-                    // if it fails.
-                    self.de.current_depth += 1;
-                }
-            }
-
-            self.idx += 1;
-
-            if let Some(len) = self.tuple_length {
-                // At tuple end, we need to exit without extra probing.
-                // Serde knows the tuple is ended and won't be calling
-                // next_element_seed again.
-                if self.idx == len {
-                    if self.de.mode.is_inline() {
-                        self.de.exit_line()?;
-                    } else {
-                        if !self.is_merged {
-                            self.de.exit_body()?;
-                        }
-                    }
-                    self.de.mode = ParsingMode::Block(true);
-                    self.de.seq_pos = None;
-                }
-            }
-
-            ret
-        */
     }
 }
 

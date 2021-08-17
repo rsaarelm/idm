@@ -68,6 +68,13 @@ impl<'a> Shape<'a> {
         }
     }
 
+    pub fn is_standalone_comment(&self) -> bool {
+        match self {
+            Shape::BodyLine(s) if s.starts_with("--") => true,
+            _ => false
+        }
+    }
+
     pub fn has_comment_head(&self) -> bool {
         match self {
             Shape::BodyLine(s) if s.starts_with("--") => true,
@@ -284,8 +291,7 @@ impl<'a> Lexer<'a> {
         if body_segments.len() < self.indent_segments.len() {
             self.dedent();
             Ok(())
-        } else if self.indent_segments.len() == 1
-            && body_prefix.is_empty()
+        } else if !self.indent_segments.is_empty()
             && self.content().chars().all(|c| c.is_whitespace())
         {
             // Drop out to level -1 if at EOF

@@ -24,7 +24,7 @@ fn ser_simple_sequence() {
     test("1\n2\n3", &(1, 2, 3));
 }
 
-//#[test]
+#[test]
 fn ser_block_sequence() {
     test(
         "\
@@ -82,7 +82,7 @@ fn ser_nested_sequence() {
 
 }
 
-//#[test]
+#[test]
 fn ser_sequence_with_separators() {
     // Outline inner form
     // Not the default serialization form, so we specify an inexact test.
@@ -134,7 +134,7 @@ fn ser_sequence_with_separators() {
     );
 }
 
-//#[test]
+#[test]
 fn ser_section_tuple() {
     test_inexact(
         "\
@@ -161,7 +161,7 @@ fn ser_section_tuple() {
     );
 }
 
-//#[test]
+#[test]
 fn ser_tuple_tail_sequence_continuation() {
     test::<(i32, i32, Vec<i32>)>(
         "\
@@ -269,7 +269,7 @@ A
     );
 }
 
-//#[test]
+#[test]
 fn ser_escape_comment() {
     // Standalone string (not sequence), no escaping
     test("--", &s("--"));
