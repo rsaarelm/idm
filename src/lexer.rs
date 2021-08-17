@@ -246,6 +246,13 @@ impl<'a> Lexer<'a> {
         if body_segments.len() < self.indent_segments.len() {
             self.dedent();
             Ok(())
+        } else if self.indent_segments.len() == 1
+            && body_prefix.is_empty()
+            && self.content().chars().all(|c| c.is_whitespace())
+        {
+            // Drop out to level -1 if at EOF
+            self.dedent();
+            Ok(())
         } else {
             self.err("Lexer::exit_body Unparsed input remains")
         }
@@ -641,6 +648,16 @@ mod tests {
         assert_eq!(lexer.enter_body(), Ok(None));
         // Enter the line.
         assert_eq!(lexer.enter_body(), Ok(Some("a")));
+    }
+
+    #[test]
+    fn lexer_exit_body() {
+        let mut lexer = t("a");
+        assert_eq!(lexer.enter_body(), Ok(None));
+        assert!(lexer.clone().exit_body().is_err(), "Unconsumed 'a'");
+        assert_eq!(lexer.enter_body(), Ok(Some("a")));
+        assert!(lexer.exit_body().is_ok());
+        assert!(lexer.exit_body().is_ok());
     }
 
     #[test]
