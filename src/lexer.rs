@@ -519,22 +519,22 @@ impl<'a> fmt::Debug for Lexer<'a> {
         // printed string
         write!(
             f,
-            "Lexer {{ indent: {:?} x {:?}, input: ",
+            "{{ indent: {:?} x {:?}, ",
             self.indent_char.unwrap_or('\0'),
             self.indent_segments
         )?;
 
-        if self.input.len() > MAX_LEN {
-            let cut_pos = self
-                .input
+        let input = self.inline_input.unwrap_or(self.input);
+        if input.len() > MAX_LEN {
+            let cut_pos = input
                 .char_indices()
                 .take(MAX_LEN - 3)
                 .map(|(i, _)| i)
                 .last()
                 .unwrap_or(0);
-            write!(f, "{:?}...", &self.input[..cut_pos])?;
+            write!(f, "{:?}...", &input[..cut_pos])?;
         } else {
-            write!(f, "{:?}", self.input)?;
+            write!(f, "{:?}", input)?;
         }
         write!(f, " }}")
     }
