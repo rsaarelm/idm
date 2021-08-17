@@ -80,9 +80,12 @@ fn ser_nested_sequence() {
         &[[1, 2], [3, 4]],
     );
 
+}
+
+//#[test]
+fn ser_sequence_with_separators() {
     // Outline inner form
     // Not the default serialization form, so we specify an inexact test.
-
     test_inexact(
         "\
 --

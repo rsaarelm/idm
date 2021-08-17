@@ -437,6 +437,8 @@ impl<'a> Lexer<'a> {
                 } else {
                     parse::line(content).map_err(self.numerize())?.0
                 }
+            } else if line.chars().all(|c| c.is_whitespace()) {
+                ""
             } else {
                 &line[current_prefix.len()..]
             };
@@ -845,6 +847,7 @@ struct
         let mut lexer = t("--\n\n\t1");
         lexer.enter_body().unwrap();
         assert_eq!(lexer.enter_body(), Ok(Some("--")));
-        assert_eq!(lexer.read(), Ok("--\n\n\t1".into()));
+        assert_eq!(lexer.read(), Ok("".into()));
+        assert_eq!(lexer.read(), Ok("1".into()));
     }
 }
