@@ -71,8 +71,10 @@ pub struct Deserializer<'de> {
 
 impl<'de> Deserializer<'de> {
     pub fn new(input: &'de str) -> Deserializer<'de> {
+        let lexer = Lexer::new(input);
+        log::debug!("\x1b[1;32mDeserializing {:?}\x1b[0m", lexer);
         Deserializer {
-            lexer: Lexer::new(input),
+            lexer,
             mode: ParsingMode::Block,
             seq_pos: None,
             checkpoint: Default::default(),
@@ -96,6 +98,7 @@ impl<'de> Deserializer<'de> {
     /// This can be very expensive, it can read a whole file, so only use it
     /// when you know you need it.
     fn next_token(&mut self) -> Result<Cow<str>> {
+        log::debug!("next_token: {:?}", self.lexer);
         use ParsingMode::*;
         match self.mode {
             Block => Ok(Cow::from(self.lexer.read()?)),
@@ -277,6 +280,7 @@ impl<'a, 'de> de::Deserializer<'de> for &'a mut Deserializer<'de> {
     {
         use Shape::*;
         self.verify_seq_startable()?;
+        log::debug!("deserialize_seq: {:?}", self.lexer);
 
         // NB: Merging is only supported for variable-length seqs, not tuples.
         // It would mess up tuple/fixed-width-array matrices otherwise.
@@ -294,15 +298,18 @@ impl<'a, 'de> de::Deserializer<'de> for &'a mut Deserializer<'de> {
                 if !headline.starts_with("--") {
                     return err!("deserialize_seq: Both headline and body");
                 } else {
+                    log::debug!("deserialize_seq: Block with comment headline");
                     self.mode = ParsingMode::Block;
                     self.lexer.enter_body()?;
                 }
             }
             Some(Block) => {
+                log::debug!("deserialize_seq: Block");
                 self.mode = ParsingMode::Block;
                 self.lexer.enter_body()?;
             }
             Some(BodyLine(_)) => {
+                log::debug!("deserialize_seq: Inline");
                 self.mode = ParsingMode::Word;
             }
         }
@@ -319,22 +326,27 @@ impl<'a, 'de> de::Deserializer<'de> for &'a mut Deserializer<'de> {
     {
         use Shape::*;
         self.verify_seq_startable()?;
+        log::debug!("deserialize_tuple: {:?}", self.lexer);
 
         match self.lexer.classify() {
             None => return err!("deserialize_tuple: EOF"),
             Some(Section(headline)) => {
                 if !headline.starts_with("--") {
+                    log::debug!("deserialize_tuple: Section");
                     self.mode = ParsingMode::Line;
                 } else {
+                    log::debug!("deserialize_tuple: Block with comment headline");
                     self.mode = ParsingMode::Block;
                     self.lexer.enter_body()?;
                 }
             }
             Some(Block) => {
+                log::debug!("deserialize_tuple: Block");
                 self.mode = ParsingMode::Block;
                 self.lexer.enter_body()?;
             }
             Some(BodyLine(_)) => {
+                log::debug!("deserialize_tuple: Inline");
                 self.mode = ParsingMode::Word;
             }
         }
@@ -470,6 +482,7 @@ impl<'a, 'de> Sequence<'a, 'de> {
     }
 
     fn exit(&mut self) -> Result<()> {
+        log::debug!("exit: {:?}", self.de.lexer);
         if self.de.mode.is_inline() {
             self.de.lexer.exit_words()?;
         } else {
@@ -501,11 +514,13 @@ impl<'a, 'de> de::SeqAccess<'de> for Sequence<'a, 'de> {
         }
 
         if self.tuple_length.is_none() && !self.de.has_next_token() {
+            log::debug!("next_element_seed: Out of sequence elements");
             self.exit()?;
             return Ok(None);
         }
 
         let ret = seed.deserialize(&mut *self.de).map(Some);
+        log::debug!("next_element_seed: Deserialized element {}", self.idx);
         self.idx += 1;
 
         if let Some(len) = self.tuple_length {

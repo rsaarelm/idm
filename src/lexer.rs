@@ -66,19 +66,24 @@ pub enum Shape<'a> {
 impl<'a> Lexer<'a> {
     /// Classify the shape at the current lexer position.
     pub fn classify(&self) -> Option<Shape> {
+        log::debug!("Lexer::classify: {:?}", self);
         let mut probe = self.clone();
         match probe.enter_body() {
             Ok(None) => {
                 if probe.exit_body().is_err() {
+                    log::debug!("Lexer::classify: Block");
                     Some(Shape::Block)
                 } else {
+                    log::debug!("Lexer::classify: Empty");
                     None
                 }
             }
             Ok(Some(content)) => {
                 if probe.exit_body().is_err() {
+                    log::debug!("Lexer::classify: Section");
                     Some(Shape::Section(content))
                 } else {
+                    log::debug!("Lexer::classify: BodyLine");
                     Some(Shape::BodyLine(content))
                 }
             }
@@ -158,6 +163,7 @@ impl<'a> Lexer<'a> {
     /// input, feel free to use this for probing input with clones of the
     /// lexer.
     pub fn enter_body(&mut self) -> Result<Option<&'a str>> {
+        log::debug!("Lexer::enter_body: {:?}", self);
         // At EOF.
         // - Can't have headline or body, fail out.
         if self.input == "" {
@@ -234,6 +240,7 @@ impl<'a> Lexer<'a> {
     ///
     /// Should be cheap to call, feel free to use with cloned lexers.
     pub fn exit_body(&mut self) -> Result<()> {
+        log::debug!("Lexer::exit_body: {:?}", self);
         let (body_prefix, _) = parse::indent(self.input)?;
         let body_segments = self.match_indent(body_prefix)?;
         if body_segments.len() < self.indent_segments.len() {
