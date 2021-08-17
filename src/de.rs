@@ -100,6 +100,11 @@ impl<'de> Deserializer<'de> {
     fn next_token(&mut self) -> Result<Cow<str>> {
         log::debug!("next_token: {:?}", self.lexer);
         use ParsingMode::*;
+
+        if self.lexer.at_eof() {
+            return err!("next_token: At EOF");
+        }
+
         match self.mode {
             Block => Ok(Cow::from(self.lexer.read()?)),
             Line => {
@@ -107,7 +112,7 @@ impl<'de> Deserializer<'de> {
                     self.mode = Block;
                     Ok(Cow::from(head))
                 } else {
-                    return err!("next_token No line");
+                    return err!("next_token: No line");
                 }
             }
             Word => Ok(Cow::from(self.lexer.word()?)),
@@ -335,7 +340,9 @@ impl<'a, 'de> de::Deserializer<'de> for &'a mut Deserializer<'de> {
                     log::debug!("deserialize_tuple: Section");
                     self.mode = ParsingMode::Line;
                 } else {
-                    log::debug!("deserialize_tuple: Block with comment headline");
+                    log::debug!(
+                        "deserialize_tuple: Block with comment headline"
+                    );
                     self.mode = ParsingMode::Block;
                     self.lexer.enter_body()?;
                 }
@@ -503,6 +510,7 @@ impl<'a, 'de> de::SeqAccess<'de> for Sequence<'a, 'de> {
     where
         T: de::DeserializeSeed<'de>,
     {
+        log::debug!("next_element_seed: Start element {}", self.idx);
         // Set marker for first or last position of tuple, special parsing
         // rules are in effect in these.
         if self.tuple_length.is_some() && self.idx == 0 {
@@ -520,7 +528,11 @@ impl<'a, 'de> de::SeqAccess<'de> for Sequence<'a, 'de> {
         }
 
         let ret = seed.deserialize(&mut *self.de).map(Some);
-        log::debug!("next_element_seed: Deserialized element {}", self.idx);
+        log::debug!(
+            "next_element_seed: Deserialized element {}{}",
+            self.idx,
+            if ret.is_err() { " (FAILED)" } else { "" }
+        );
         self.idx += 1;
 
         if let Some(len) = self.tuple_length {

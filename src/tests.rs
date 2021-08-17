@@ -57,7 +57,7 @@ baz
     test("foo\n--\n  -- baz", &vec![s("foo"), s("-- baz")]);
 }
 
-//#[test]
+#[test]
 fn ser_nested_sequence() {
     // All tests are repeated for seq-like Vec types and tuple-like array
     // types because those types have different code paths in the serializer.

@@ -60,6 +60,23 @@ pub enum Shape<'a> {
     BodyLine(&'a str),
 }
 
+impl<'a> Shape<'a> {
+    pub fn is_blank(&self) -> bool {
+        match self {
+            Shape::BodyLine(s) if s.chars().all(|c| c.is_whitespace()) => true,
+            _ => false
+        }
+    }
+
+    pub fn has_comment_head(&self) -> bool {
+        match self {
+            Shape::BodyLine(s) if s.starts_with("--") => true,
+            Shape::Section(s) if s.starts_with("--") => true,
+            _ => false
+        }
+    }
+}
+
 // Utility public methods
 // (Implemented in terms of core public methods)
 
@@ -92,6 +109,12 @@ impl<'a> Lexer<'a> {
     }
 
     pub fn exit_words(&mut self) -> Result<()> {
+        log::debug!("Lexer::exit_words: {:?}", self);
+
+        if self.content() == "" {
+            return Ok(())
+        }
+
         if let Some(headline) = self.enter_body()? {
             if !headline.chars().all(|c| c.is_whitespace()) {
                 return err!("Lexer::exit_words Unparsed input left on line");
@@ -119,6 +142,19 @@ impl<'a> Lexer<'a> {
 
         Ok(word)
     }
+
+    /// Skip over the next element that would otherwise have been read with
+    /// `read`.
+    pub fn skip(&mut self) -> Result<()> {
+        log::debug!("Lexer::skip");
+        // XXX: Unoptimized, does work that gets thrown out.
+        self.read()?;
+        Ok(())
+    }
+
+    pub fn at_eof(&self) -> bool {
+        self.content().chars().all(|c| c.is_whitespace())
+    }
 }
 
 // Core public methods
@@ -136,6 +172,7 @@ impl<'a> Lexer<'a> {
 
     /// Succeed if only whitespace remains of input.
     pub fn end(&mut self) -> Result<()> {
+        log::debug!("Lexer::end");
         for (i, c) in self.content().char_indices() {
             if !c.is_whitespace() {
                 return self.err("Lexer::end Unparsed input remains");
@@ -230,6 +267,7 @@ impl<'a> Lexer<'a> {
     ///
     /// Used to parse content for the special `_contents` struct field.
     pub fn dedent(&mut self) {
+        log::debug!("Lexer::dedent");
         self.indent_segments
             .pop()
             .expect("Lexer::dedent already at bottom of indent stack");
@@ -263,6 +301,7 @@ impl<'a> Lexer<'a> {
     ///
     /// Failure from `word` does not invalidate the lexer.
     pub fn word(&mut self) -> Result<&str> {
+        log::debug!("Lexer::word");
         let input = self.content();
 
         if input == "" {
@@ -308,6 +347,7 @@ impl<'a> Lexer<'a> {
     /// when you know you want to read the thing at the current point of
     /// input.
     pub fn read(&mut self) -> Result<String> {
+        log::debug!("Lexer::read: {:?}", self);
         let mut ret = String::new();
         self.read_into(&mut ret)?;
         if !ret.is_empty() {
@@ -798,5 +838,13 @@ struct
         assert_eq!(lexer.word(), Ok("a"));
         // Fail if key is not at start of line.
         assert!(lexer.key().is_err());
+    }
+
+    #[test]
+    fn lexer_read_empty() {
+        let mut lexer = t("--\n\n\t1");
+        lexer.enter_body().unwrap();
+        assert_eq!(lexer.enter_body(), Ok(Some("--")));
+        assert_eq!(lexer.read(), Ok("--\n\n\t1".into()));
     }
 }
