@@ -309,7 +309,11 @@ impl<'a, 'de> de::Deserializer<'de> for &'a mut Deserializer<'de> {
         visitor.visit_seq(Sequence::new(self))
     }
 
-    fn deserialize_tuple<V>(mut self, len: usize, visitor: V) -> Result<V::Value>
+    fn deserialize_tuple<V>(
+        mut self,
+        len: usize,
+        visitor: V,
+    ) -> Result<V::Value>
     where
         V: de::Visitor<'de>,
     {
