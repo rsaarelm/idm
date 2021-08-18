@@ -126,6 +126,22 @@ fn ser_sequence_with_separators() {
         &[[1, 2], [3, 4]],
     );
 
+    test_inexact(
+        "\
+--
+  1
+  2
+-- Here is a multiline comment
+-- Multiple comment lines with no content in between
+--
+-- Even if they're empty
+-- Don't mean an empty sequence exists in between them
+--
+  3
+  4",
+        &vec![vec![1, 2], vec![3, 4]],
+    );
+
     // Outline list of matrices.
     test(
         "\
@@ -175,6 +191,18 @@ fn ser_section_tuple() {
 \t4",
         &vec![(1, 2), (3, 4)],
     );
+
+    test(
+        "\
+Lorem
+  --
+    ipsum dolor sit amet
+    consectetur adipiscing elit",
+        &vec![(
+            "Lorem".to_string(),
+            "ipsum dolor sit amet\nconsectetur adipiscing elit".to_string(),
+        )],
+    );
 }
 
 #[test]
@@ -189,20 +217,13 @@ fn ser_tuple_tail_sequence_continuation() {
     );
 }
 
-//#[test]
+#[test]
 fn ser_option_tuple() {
     test::<Vec<(Option<i32>, i32)>>(
         "\
 1
 \t2",
         &vec![(Some(1), 2)],
-    );
-
-    test::<Vec<(Option<i32>, i32)>>(
-        "\
---
-\t2",
-        &vec![(None, 2)],
     );
 }
 
@@ -247,8 +268,21 @@ A
         &outline!["A", ["--", "C"]],
     );
 
-    test("A\n\nB", &outline!["A", "", "B"]);
-    test("A\n  B\n\n  C", &outline![["A", "B", "", "C"]]);
+    test(
+        "\
+A
+
+B",
+        &outline!["A", "", "B"],
+    );
+    test(
+        "\
+A
+  B
+
+  C",
+        &outline![["A", "B", "", "C"]],
+    );
 }
 
 #[test]
@@ -256,7 +290,7 @@ fn ser_escape_comment() {
     // Standalone string (not sequence), no escaping
     test("--", &s("--"));
 
-    // Line mode, must escape
+    // Use separator to make the comment paragraph-like in an outline list
     test_inexact::<Vec<String>>(
         "\
 --
@@ -264,30 +298,59 @@ fn ser_escape_comment() {
 foo",
         &vec![s("--"), s("foo")],
     );
+}
 
-    // Paragraph mode, as is
-    test_inexact::<Vec<String>>(
+#[test]
+fn ser_inline_map() {
+    test(
         "\
---
-\t--
---
-\tfoo",
-        &vec![s("--"), s("foo")],
+foo 1
+bar 2",
+        &BTreeMap::from_iter(vec![
+            ("foo".to_string(), 1),
+            ("bar".to_string(), 2),
+        ]),
     );
 }
 
-//#[test]
-fn ser_struct() {
+#[test]
+fn ser_outline_map() {
+    test_inexact(
+        "\
+foo
+  1
+bar
+  2",
+        &BTreeMap::from_iter(vec![
+            ("foo".to_string(), 1),
+            ("bar".to_string(), 2),
+        ]),
+    );
+
+    test_inexact(
+        "\
+foo
+  1
+  2
+  3
+bar
+  2
+  3
+  4",
+        &BTreeMap::from_iter(vec![
+            ("foo".to_string(), vec![1, 2, 3]),
+            ("bar".to_string(), vec![2, 3, 4]),
+        ]),
+    );
+}
+
+#[test]
+fn ser_simple_struct() {
     #[derive(Clone, Eq, PartialEq, Default, Debug, Serialize, Deserialize)]
     struct Simple {
         name_text: String,
         x: i32,
         y: i32,
-    }
-
-    #[derive(Clone, Eq, PartialEq, Default, Debug, Serialize, Deserialize)]
-    struct Vectored {
-        v: Vec<i32>,
     }
 
     test(
@@ -300,21 +363,6 @@ y: 2",
             x: 1,
             y: 2,
         },
-    );
-
-    test(
-        "\
-v: 1 2 3",
-        &Vectored { v: vec![1, 2, 3] },
-    );
-
-    test_inexact(
-        "\
-v:
-\t1
-\t2
-\t3",
-        &Vectored { v: vec![1, 2, 3] },
     );
 
     // Must fail if there's no _contents field to grab contents
@@ -336,7 +384,56 @@ y: 2
 unexpected: stuff"
     )
     .is_err());
+}
 
+#[test]
+fn ser_map_structs() {
+    #[derive(Clone, Eq, PartialEq, Default, Debug, Serialize, Deserialize)]
+    struct Simple {
+        x: i32,
+        y: i32,
+    }
+
+    test(
+        "\
+one
+  x: 3
+  y: 4
+two
+  x: 5
+  y: 6",
+        &BTreeMap::from_iter(vec![
+            ("one".to_string(), Simple { x: 3, y: 4 }),
+            ("two".to_string(), Simple { x: 5, y: 6 }),
+        ]),
+    );
+}
+
+#[test]
+fn ser_vector_struct() {
+    #[derive(Clone, Eq, PartialEq, Default, Debug, Serialize, Deserialize)]
+    struct Vectored {
+        v: Vec<i32>,
+    }
+
+    test(
+        "\
+v: 1 2 3",
+        &Vectored { v: vec![1, 2, 3] },
+    );
+
+    test_inexact(
+        "\
+v:
+\t1
+\t2
+\t3",
+        &Vectored { v: vec![1, 2, 3] },
+    );
+}
+
+#[test]
+fn ser_struct_flatten() {
     /*
          XXX: Does not currently work, see https://github.com/serde-rs/serde/issues/1346
          FIXME if the Serde issue gets resolved.
@@ -363,7 +460,7 @@ unexpected: stuff"
     */
 }
 
-//#[test]
+#[test]
 fn ser_struct_contents() {
     #[derive(Clone, Eq, PartialEq, Default, Debug, Serialize, Deserialize)]
     struct Contentful {
@@ -416,7 +513,7 @@ B",
         "\
 a: 1
 x
-\ta: 2",
+  a: 2",
         &Recursive {
             a: 1,
             _contents: BTreeMap::from_iter(vec![(
@@ -432,7 +529,7 @@ x
     test(
         "\
 item
-\ta: 1",
+  a: 1",
         &Recursive {
             a: 0,
             _contents: BTreeMap::from_iter(vec![(
@@ -448,8 +545,8 @@ item
     test(
         "\
 items
-\titem
-\t\ta: 1",
+  item
+    a: 1",
         &Recursive {
             a: 0,
             _contents: BTreeMap::from_iter(vec![(
@@ -469,7 +566,8 @@ items
     );
 }
 
-//#[test]
+/* FIXME
+#[test]
 fn ser_oneshot_section() {
     #[derive(Clone, Eq, PartialEq, Default, Debug, Serialize, Deserialize)]
     struct Data {
@@ -480,56 +578,40 @@ fn ser_oneshot_section() {
     test(
         "\
 Headline
-\tx: 1
-\ty: 2",
+  x: 1
+  y: 2",
         &vec![("Headline".to_string(), Data { x: 1, y: 2 })],
     );
 }
+*/
 
-//#[test]
-fn ser_oneshot_section_opt() {
-    #[derive(Clone, Eq, PartialEq, Default, Debug, Serialize, Deserialize)]
-    struct Data {
-        x: i32,
-        y: i32,
-    }
-
-    test(
-        "\
-Headline
-\tx: 1
-\ty: 2",
-        &vec![(Some("Headline".to_string()), Data { x: 1, y: 2 })],
-    );
-}
-
-//#[test]
+#[test]
 fn ser_nesting_contents() {
     const STARMAP: &str = "\
 Sol
-\tage: 4.6e9
-\tmass: 1.0
-\tMercury
-\t\torbit: 0.39
-\t\tmass: 0.055
-\tVenus
-\t\torbit: 0.72
-\t\tmass: 0.815
-\tEarth
-\t\torbit: 1.0
-\t\tmass: 1.0
-\tMars
-\t\torbit: 1.52
-\t\tmass: 0.1
+  age: 4.6e9
+  mass: 1.0
+  Mercury
+    orbit: 0.39
+    mass: 0.055
+  Venus
+    orbit: 0.72
+    mass: 0.815
+  Earth
+    orbit: 1.0
+    mass: 1.0
+  Mars
+    orbit: 1.52
+    mass: 0.1
 Alpha Centauri
-\tage: 5.3e9
-\tmass: 1.1
-\tEurytion
-\t\torbit: 0.47
-\t\tmass: 0.08
-\tChiron
-\t\torbit: 1.32
-\t\tmass: 1.33";
+  age: 5.3e9
+  mass: 1.1
+  Eurytion
+    orbit: 0.47
+    mass: 0.08
+  Chiron
+    orbit: 1.32
+    mass: 1.33";
 
     #[derive(Clone, PartialEq, Default, Debug, Serialize, Deserialize)]
     struct Star {
@@ -581,7 +663,7 @@ Alpha Centauri
     test_inexact(STARMAP, &starmap);
 }
 
-//#[test]
+#[test]
 fn ser_value_length() {
     #[derive(PartialEq, Default, Debug, Serialize, Deserialize)]
     struct Entry {
@@ -642,7 +724,7 @@ y: s("a"),
     );
 }
 
-//#[test]
+#[test]
 fn ser_comment_value() {
     #[derive(Eq, PartialEq, Debug, Serialize, Deserialize)]
     pub struct Ch {

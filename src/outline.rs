@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use serde_bytes::{Bytes, ByteBuf};
+use serde_bytes::{ByteBuf, Bytes};
 use std::{fmt, ops::Deref};
 
 #[derive(Clone, Default, PartialEq, Eq, Hash)]
@@ -24,8 +24,8 @@ impl<'de> serde::Deserialize<'de> for Section {
         // Deserialize byte buffer to trigger outline mode, convert to String.
         let (headline, body): (ByteBuf, Outline) =
             serde::Deserialize::deserialize(deserializer)?;
-        let headline =
-            String::from_utf8(headline.into_vec()).map_err(serde::de::Error::custom)?;
+        let headline = String::from_utf8(headline.into_vec())
+            .map_err(serde::de::Error::custom)?;
         Ok(Section(headline, body))
     }
 }

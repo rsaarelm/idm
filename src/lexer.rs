@@ -180,7 +180,7 @@ impl<'a> Lexer<'a> {
     /// Succeed if only whitespace remains of input.
     pub fn end(&mut self) -> Result<()> {
         log::debug!("Lexer::end");
-        for (i, c) in self.content().char_indices() {
+        for c in self.content().chars() {
             if !c.is_whitespace() {
                 return self.err("Lexer::end Unparsed input remains");
             }
@@ -408,7 +408,7 @@ impl<'a> Lexer<'a> {
             parse::indent(self.input).map_err(self.numerize())?;
         self.witness_indentation_char(current_prefix)?;
         let indent_len: usize = self.indent_segments.iter().sum();
-        let new_segments: Vec<usize> = self.match_indent(current_prefix)?;
+        self.match_indent(current_prefix)?;
 
         if current_prefix.len() < indent_len {
             return self.err("Lexer::read_into out of depth");

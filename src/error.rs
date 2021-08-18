@@ -1,4 +1,4 @@
-use std::{error, fmt, borrow::Cow};
+use std::{borrow::Cow, error, fmt};
 
 pub type Result<T> = std::result::Result<T, Error>;
 

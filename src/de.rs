@@ -108,7 +108,7 @@ impl<'a, 'de> de::Deserializer<'de> for &'a mut Deserializer<'de> {
             // assumptions were made.
             self.checkpoint.restore(&mut self.parser);
             // Force section mode.
-            self.parser.mode = ParsingMode::Line;
+            self.parser.mode = ParsingMode::Headline;
         }
 
         visitor.visit_bytes(self.parser.next_token()?.as_bytes())
@@ -225,7 +225,7 @@ impl<'a, 'de> de::Deserializer<'de> for &'a mut Deserializer<'de> {
             Some(Section(headline)) => {
                 if !headline.starts_with("--") {
                     log::debug!("deserialize_tuple: Section");
-                    self.parser.mode = ParsingMode::Line;
+                    self.parser.mode = ParsingMode::Headline;
                 } else {
                     log::debug!(
                         "deserialize_tuple: Block with comment headline"
@@ -263,18 +263,11 @@ impl<'a, 'de> de::Deserializer<'de> for &'a mut Deserializer<'de> {
     where
         V: de::Visitor<'de>,
     {
-        todo!();
-        /*
-        match self.mode {
-            ParsingMode::Line(_) | ParsingMode::Word | ParsingMode::Key(_) => {
-                return err!("deserialize_struct: Can't nest in inline seq");
-            }
-            _ => {}
-        }
+        self.parser.verify_seq_startable()?;
+        log::debug!("deserialize_map: {:?}", self.parser.lexer);
 
-        self.enter_body()?;
+        self.parser.lexer.enter_body()?;
         visitor.visit_map(Sequence::new(self))
-        */
     }
 
     fn deserialize_struct<V>(
@@ -286,18 +279,11 @@ impl<'a, 'de> de::Deserializer<'de> for &'a mut Deserializer<'de> {
     where
         V: de::Visitor<'de>,
     {
-        todo!();
-        /*
-        match self.mode {
-            ParsingMode::Line(_) | ParsingMode::Word | ParsingMode::Key(_) => {
-                return err!("deserialize_struct: Can't nest in inline seq");
-            }
-            _ => {}
-        }
+        self.parser.verify_seq_startable()?;
+        log::debug!("deserialize_struct: {:?}", self.parser.lexer);
 
-        self.enter_body()?;
+        self.parser.lexer.enter_body()?;
         visitor.visit_map(Sequence::new(self).as_struct(fields))
-        */
     }
 
     fn deserialize_enum<V>(
@@ -469,17 +455,48 @@ impl<'a, 'de> de::MapAccess<'de> for Sequence<'a, 'de> {
     where
         K: de::DeserializeSeed<'de>,
     {
-        todo!();
-        /*
-        if self.contents_mode
-            || !self.de.cursor.has_headline_content(self.de.current_depth)
-        {
+        log::debug!("next_key_seed start");
+        if self.contents_mode {
+            log::debug!(
+                "next_key_seed: Already entered contents mode, no more keys"
+            );
+            // Do not call exit in contents mode.
+            // Similar to merged mode. Deserializing contents object should
+            // have handled the stack.
             return Ok(None);
         }
 
+        // Is the value an outline as in
+        //     x:
+        //       1
+        //       2
+        //
+        // and not
+        //     x: 1 2
+        let is_outline_value = match self.de.parser.lexer.classify() {
+            None => {
+                log::debug!("next_key_seed: Out of input, exiting");
+                self.exit()?;
+                return Ok(None);
+            }
+            Some(Shape::Block) => {
+                return err!("next_key_seed: Invalid shape");
+            }
+            Some(Shape::Section(_)) => {
+                log::debug!("next_key_seed: Section key-value");
+                true
+            }
+            Some(Shape::BodyLine(_)) => {
+                log::debug!("next_key_seed: Inline key-value");
+                false
+            }
+        };
+
         if self.is_struct {
-            self.de.mode = ParsingMode::Key(false);
-            if self.de.cursor.clone().key().is_err() {
+            log::debug!("next_key_seed: (struct) {:?}", self.de.parser.lexer);
+            self.de.parser.mode = ParsingMode::Key;
+
+            if self.de.parser.clone().next_token().is_err() {
                 // Must have _contents field present for the next bit to work.
                 //
                 // (Or have an empty fields list, in case we assume anything
@@ -490,69 +507,60 @@ impl<'a, 'de> de::MapAccess<'de> for Sequence<'a, 'de> {
                     return err!("next_key_seed: No _contents field to catch additional contents");
                 }
 
+                log::debug!(
+                    "next_key_seed: Out of keys, entering contents mode"
+                );
+
                 // There's still content, but no valid key. Do the magic bit
                 // and conjure up a '_contents' key for the remaining content.
-                self.de.mode = ParsingMode::Key(true);
-                // Also mess with depth so it looks like this is a whole new
-                // section with an empty headline, the whole remaining body
-                // needs to end up in the _contents part.
-                self.de.current_depth -= 1;
+                self.de.parser.mode = ParsingMode::DummyKey;
                 self.contents_mode = true;
             }
 
-            // Make sure we're only seeing struct keys we actually expect to
-            // see.
-            //
-            // Special case, if the expected list is empty, assume we're doing
-            // some special deserialization that takes freeform keys and just
-            // process everything.
-            if let Ok(key) = self.de.cursor.clone().key() {
+            // Don't let unrecognized keys through.
+            if let Ok(key) = self.de.parser.clone().next_token() {
                 if !self.struct_fields.is_empty()
-                    && !self.struct_fields.contains(key.as_str())
+                    && !self.struct_fields.contains(&*key)
                 {
-                    return err!("next_key_seed: Unmatched struct key {}", key);
+                    return err!(
+                        "next_key_seed: Unmatched struct key {:?}",
+                        key
+                    );
                 }
             }
         } else {
-            if self.de.cursor.is_section(self.de.current_depth) {
-                // Has both headline and body.
-                // Assume full headline is key, body is content.
-                self.de.mode = ParsingMode::Line(false);
+            log::debug!("next_key_seed: (map) {:?}", self.de.parser.lexer);
+
+            // Keys are read as regular values for a map
+            if is_outline_value {
+                // Lines for outline content
+                self.de.parser.mode = ParsingMode::Headline;
             } else {
-                // Has no body. Assume first headline word is key, rest of
-                // headline is value.
-                self.de.mode = ParsingMode::Word;
+                // The first word for inline content.
+                self.de.parser.mode = ParsingMode::Word;
             }
         }
 
         let ret = seed.deserialize(&mut *self.de).map(Some);
-        // If we're in word mode, drop out of it, first headline item was
-        // parsed as key, but the entire rest of the line needs to be value.
-        if self.de.mode == ParsingMode::Word {
-            self.de.mode = ParsingMode::Block(false);
+
+        if !self.is_struct && is_outline_value {
+            self.de.parser.lexer.dedent();
         }
+
         ret
-        */
     }
 
     fn next_value_seed<V>(&mut self, seed: V) -> Result<V::Value>
     where
         V: de::DeserializeSeed<'de>,
     {
-        todo!();
-        /*
-        let need_exit = if let ParsingMode::Line(_) = self.de.mode {
-            self.de.mode = ParsingMode::Block(false);
-            true
-        } else {
-            false
-        };
-        let ret = seed.deserialize(&mut *self.de);
-        if need_exit {
-            self.de.exit_body()?;
+        // Maps with inline entries read key as word, but the whole remaining
+        // line as value.
+        if self.de.parser.mode == ParsingMode::Word {
+            self.de.parser.mode = ParsingMode::Line;
         }
-        ret
-        */
+        log::debug!("next_value_seed: {:?}", self.de.parser.lexer);
+        seed.deserialize(&mut *self.de)
     }
 }
 

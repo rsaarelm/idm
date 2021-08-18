@@ -1,5 +1,9 @@
-use crate::{err, lexer::Lexer, lexer::Shape, Error, Result};
-use std::{str::FromStr, borrow::Cow};
+use crate::{
+    err,
+    lexer::{Lexer, Shape},
+    Error, Result,
+};
+use std::{borrow::Cow, str::FromStr};
 
 #[derive(Clone)]
 pub struct Parser<'a> {
@@ -13,9 +17,10 @@ pub enum ParsingMode {
     /// The most common parsing mode, up to the next element with the same or
     /// higher indent than the current point.
     Block,
-    /// Up to the end of the current line only, even if there are more
-    /// indented lines after this.
+    /// The rest of a line, then fall back to previous level.
     Line,
+    /// The rest of a line, then enter the body.
+    Headline,
     /// Single whitespace-separated token. Do not move to next line.
     Word,
     /// Single whitespace-separated token, must have form "key-name:" (valid
@@ -29,14 +34,6 @@ pub enum ParsingMode {
 }
 
 impl ParsingMode {
-    pub fn is_block(self) -> bool {
-        use ParsingMode::*;
-        match self {
-            Block => true,
-            _ => false,
-        }
-    }
-
     pub fn is_inline(self) -> bool {
         use ParsingMode::*;
         match self {
@@ -94,14 +91,57 @@ impl<'a> Parser<'a> {
             Block => Ok(Cow::from(self.lexer.read()?)),
             Line => {
                 if let Some(head) = self.lexer.enter_body()? {
+                    // And back down again, body must be empty.
+                    self.lexer.exit_body()?;
                     self.mode = Block;
                     Ok(Cow::from(head))
                 } else {
                     return err!("next_token: No line");
                 }
             }
+            Headline => {
+                if let Some(head) = self.lexer.enter_body()? {
+                    // Stay inside body, continue to body lines.
+                    self.mode = Block;
+                    Ok(Cow::from(head))
+                } else {
+                    return err!("next_token: No headline");
+                }
+            }
             Word => Ok(Cow::from(self.lexer.word()?)),
-            Key => Ok(Cow::from(self.lexer.key()?)),
+            Key => {
+                let ret = Cow::from(self.lexer.key()?);
+                // Smart next mode.
+                match self.lexer.classify() {
+                    None => {
+                        return err!("next_token: Key without value");
+                    }
+                    Some(Shape::Section(headline)) => {
+                        if !headline.chars().all(|c| c.is_whitespace()) {
+                            // Must be either inline or block.
+                            return err!(
+                                "next_token: Section-shaped balue for key"
+                            );
+                        }
+                        log::debug!(
+                            "next_token: Preparing for outline value for key"
+                        );
+                        self.lexer.enter_body()?;
+                        self.lexer.dedent();
+                        self.mode = Block;
+                    }
+                    Some(Shape::BodyLine(_)) => {
+                        log::debug!(
+                            "next_token: Preparing for inline value for key"
+                        );
+                        self.mode = Line;
+                    }
+                    Some(Shape::Block) => {
+                        return err!("next_token: Block shape after key");
+                    }
+                }
+                Ok(ret)
+            }
             DummyKey => {
                 self.mode = Block;
                 self.lexer.dedent();
@@ -116,10 +156,7 @@ impl<'a> Parser<'a> {
 
     pub fn verify_seq_startable(&self) -> Result<()> {
         match self.mode {
-            ParsingMode::Line
-            | ParsingMode::Word
-            | ParsingMode::Key
-            | ParsingMode::DummyKey => {
+            ParsingMode::Word | ParsingMode::Key | ParsingMode::DummyKey => {
                 err!("Nested sequence found in inline sequence")
             }
             _ => Ok(()),
