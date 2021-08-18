@@ -59,7 +59,6 @@ pub enum SequencePos {
 impl<'a> Parser<'a> {
     pub fn new(input: &'a str) -> Parser<'a> {
         let lexer = Lexer::new(input);
-        log::debug!("\x1b[1;32mDeserializing {:?}\x1b[0m", lexer);
         Parser {
             lexer,
             mode: ParsingMode::Block,
@@ -127,7 +126,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    pub fn input(&self) -> &str {
+    pub fn input(&self) -> &'a str {
         self.lexer.input()
     }
 }

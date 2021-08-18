@@ -93,52 +93,42 @@ impl<'a, 'de> de::Deserializer<'de> for &'a mut Deserializer<'de> {
         self.deserialize_str(visitor)
     }
 
-    fn deserialize_bytes<V>(self, _visitor: V) -> Result<V::Value>
+    fn deserialize_bytes<V>(self, visitor: V) -> Result<V::Value>
     where
         V: de::Visitor<'de>,
     {
-        unimplemented!()
+        // Byte buffer is the marker for outline mode.
+        log::debug!("deserialize_bytes called");
+
+        if self.parser.seq_pos == Some(SequencePos::TupleStart) {
+            log::debug!(
+                "deserialize_bytes at tuple start, switching to line mode"
+            );
+            // Force section mode.
+            self.parser.mode = ParsingMode::Line;
+            // Go back to parser state before earlier sequence parsing
+            // assumptions were made.
+            self.checkpoint.restore(&mut self.parser);
+        }
+
+        visitor.visit_bytes(self.parser.next_token()?.as_bytes())
     }
 
-    fn deserialize_byte_buf<V>(self, _visitor: V) -> Result<V::Value>
+    fn deserialize_byte_buf<V>(self, visitor: V) -> Result<V::Value>
     where
         V: de::Visitor<'de>,
     {
-        unimplemented!()
+        self.deserialize_bytes(visitor)
     }
 
     fn deserialize_option<V>(self, visitor: V) -> Result<V::Value>
     where
         V: de::Visitor<'de>,
     {
-        todo!();
-        /*
-        if self.seq_pos == Some(SequencePos::TupleStart) {
-            // The hairy magic bit: If we're at the start of a tuple, force
-            // line mode here. An empty headline will be read as the tuple
-            // value instead of a signal to enter block mode.
-            self.mode = ParsingMode::Line(true);
-            self.delayed_enter_body_requested = false;
-        } else if self.mode.is_inline() {
-            // We can't parse a None value in inline mode because there's no
-            // notation for a missing inline entry.
-            return err!("deserialize_option: Not allowed in inline sequences");
-        }
-
-        if self.has_next_token() || self.cursor.at_empty_line() {
-            visitor.visit_some(self)
-        } else {
-            // XXX: Ugly guarantee that empty-marker gets consumed.
-            if let ParsingMode::Line(_) = self.mode {
-                if self.cursor.clone().verbatim_line(self.current_depth)
-                    == Ok(",")
-                {
-                    let _ = self.cursor.line();
-                }
-            }
-            visitor.visit_none()
-        }
-        */
+        // Parsing None isn't supported. Options can still be encountered in
+        // struct fields, but it's assumed the field will not be serialized if
+        // it's None.
+        visitor.visit_some(self)
     }
 
     fn deserialize_unit<V>(self, visitor: V) -> Result<V::Value>
@@ -191,7 +181,11 @@ impl<'a, 'de> de::Deserializer<'de> for &'a mut Deserializer<'de> {
         }
 
         match self.parser.lexer.classify() {
-            None => return err!("deserialize_seq: EOF"),
+            None => {
+                log::debug!("deserialize_seq: EOF, treating as block");
+                self.parser.mode = ParsingMode::Block;
+                self.parser.lexer.enter_body()?;
+            }
             Some(Section(headline)) => {
                 if !headline.starts_with("--") {
                     return err!("deserialize_seq: Both headline and body");
@@ -414,6 +408,9 @@ impl<'a, 'de> de::SeqAccess<'de> for Sequence<'a, 'de> {
             self.de.parser.seq_pos = None;
         }
 
+        // Snapshot before eating content.
+        let old_parser = self.de.parser.clone();
+
         // Consume comments and blanks in outline mode.
         if !self.de.parser.mode.is_inline() {
             loop {
@@ -441,6 +438,8 @@ impl<'a, 'de> de::SeqAccess<'de> for Sequence<'a, 'de> {
             self.exit()?;
             return Ok(None);
         }
+
+        self.de.checkpoint.save(old_parser, self.de.parser.input());
 
         let ret = seed.deserialize(&mut *self.de).map(Some);
         log::debug!(
@@ -568,6 +567,17 @@ struct Checkpoint<'a> {
 }
 
 impl<'a> Checkpoint<'a> {
+    /// Save a parser state as the snapshot.
+    ///
+    /// A common use pattern is to clone the parser state, run some further
+    /// parsing, then call `Checkpoint::save` with the old state and the new
+    /// input position. If the input position is unchanged and an earlier
+    /// checkpoint save already exists, a new save will not be made. We want
+    /// to return to the earliest checkpoint saved for a given position when
+    /// doing restore.
+    ///
+    /// This whole thing is sort of terrible and serves a kludgy bit in the
+    /// parsing logic.
     pub fn save(&mut self, old_state: Parser<'a>, new_pos: &'a str) {
         // Are we encoding an actual skip
         let did_skip = new_pos != old_state.input();

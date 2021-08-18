@@ -64,14 +64,14 @@ impl<'a> Shape<'a> {
     pub fn is_blank(&self) -> bool {
         match self {
             Shape::BodyLine(s) if s.chars().all(|c| c.is_whitespace()) => true,
-            _ => false
+            _ => false,
         }
     }
 
     pub fn is_standalone_comment(&self) -> bool {
         match self {
             Shape::BodyLine(s) if s.starts_with("--") => true,
-            _ => false
+            _ => false,
         }
     }
 
@@ -79,7 +79,7 @@ impl<'a> Shape<'a> {
         match self {
             Shape::BodyLine(s) if s.starts_with("--") => true,
             Shape::Section(s) if s.starts_with("--") => true,
-            _ => false
+            _ => false,
         }
     }
 }
@@ -119,7 +119,7 @@ impl<'a> Lexer<'a> {
         log::debug!("Lexer::exit_words: {:?}", self);
 
         if self.content() == "" {
-            return Ok(())
+            return Ok(());
         }
 
         if let Some(headline) = self.enter_body()? {
@@ -209,9 +209,11 @@ impl<'a> Lexer<'a> {
     pub fn enter_body(&mut self) -> Result<Option<&'a str>> {
         log::debug!("Lexer::enter_body: {:?}", self);
         // At EOF.
-        // - Can't have headline or body, fail out.
+        // - No headline obviously, but you can still churn indent and dedent if
+        //   you want.
         if self.input == "" {
-            return self.err("Lexer::enter_body at EOF");
+            self.indent_segments.push(1);
+            return Ok(None);
         }
 
         let (current_prefix, _) = parse::indent(self.input)?;
@@ -297,8 +299,10 @@ impl<'a> Lexer<'a> {
             // Drop out to level -1 if at EOF
             self.dedent();
             Ok(())
+        } else if self.indent_segments.is_empty() {
+            panic!("Lexer::exit_body: Exiting body at column -1");
         } else {
-            self.err("Lexer::exit_body Unparsed input remains")
+            self.err("Lexer::exit_body: Unparsed input remains")
         }
     }
 
@@ -368,7 +372,7 @@ impl<'a> Lexer<'a> {
         Err(Error::new(msg).line_num(self.line_num()))
     }
 
-    pub fn input(&self) -> &str {
+    pub fn input(&self) -> &'a str {
         self.input
     }
 }
@@ -688,7 +692,7 @@ mod tests {
 
     #[test]
     fn lexer_enter_body() {
-        assert!(t("").enter_body().is_err());
+        assert_eq!(t("").enter_body(), Ok(None));
         // Lexing starts at column -1.
 
         let mut lexer = t("a");

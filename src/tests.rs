@@ -1,11 +1,9 @@
-use crate::{from_str, outline, to_string};
+use crate::{from_str, outline, outline::Outline, to_string};
 use pretty_assertions::assert_eq;
-use serde_derive::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt;
 use std::iter::FromIterator;
-
-type Outline = outline::Outline<Option<String>>;
 
 #[test]
 fn ser_atom() {
@@ -79,13 +77,31 @@ fn ser_nested_sequence() {
 3 4",
         &[[1, 2], [3, 4]],
     );
-
 }
 
 #[test]
 fn ser_sequence_with_separators() {
-    // Outline inner form
     // Not the default serialization form, so we specify an inexact test.
+
+    // Mid-struct blank lines
+    test_inexact(
+        "\
+1 2
+
+3 4",
+        &vec![vec![1, 2], vec![3, 4]],
+    );
+
+    // Array case (tuple)
+    test_inexact(
+        "\
+1 2
+
+3 4",
+        &[[1, 2], [3, 4]],
+    );
+
+    // Outline inner form
     test_inexact(
         "\
 --
@@ -190,38 +206,10 @@ fn ser_option_tuple() {
     );
 }
 
-//#[test]
-fn ser_empty_outline() {
-    test("", &Outline::default());
-}
-
-//#[test]
-fn ser_outline_blanks() {
-    test("A\n\nB", &outline![["A", ""], "B"]);
-}
-
-//#[test]
-fn ser_outline_empties() {
-    test_inexact(
-        "\
---
-  Plugh",
-        &outline![[, "Plugh"]],
-    );
-
-    // Unprincipled weirdness with outline types: empty comments and comment
-    // messages get treated differently.
-    test(
-        "\
-A
--- This shows up
-\tC",
-        &outline!["A", ["-- This shows up", "C"]],
-    );
-}
-
-//#[test]
+#[test]
 fn ser_basic_outlines() {
+    test("", &Outline::default());
+
     test("Xyzzy", &outline!["Xyzzy"]);
 
     test("A\nB", &outline!["A", "B"]);
@@ -229,9 +217,6 @@ fn ser_basic_outlines() {
     test("A\n  B", &outline![["A", "B"]]);
     test("A\n  B\nC", &outline![["A", "B"], "C"]);
 
-    test("A\n  B\n\n  C", &outline![["A", ["B", ""], "C"]]);
-
-    test("A\n  B", &outline!["A", "  B"]);
     test(
         "\
 Xyzzy
@@ -251,22 +236,20 @@ Qux
         &outline![["Xyzzy", "Plugh", "Blorb"], ["Qux", "Quux"]],
     );
 
-    test(
-        "\
-Xyzzy
-\tPlugh
---
-\tQuux",
-        &outline![["Xyzzy", "Plugh"], [, "Quux"]],
-    );
+}
 
+//#[test]
+fn ser_outline_with_blanks() {
     test(
         "\
 A
 --
 \tC",
-        &outline!["A", [, "C"]],
+        &outline!["A", ["--", "C"]],
     );
+
+    test("A\n\nB", &outline![["A", ""], "B"]);
+    test("A\n  B\n\n  C", &outline![["A", ["B", ""], "C"]]);
 }
 
 #[test]
@@ -356,29 +339,29 @@ unexpected: stuff"
     .is_err());
 
     /*
-        XXX: Does not currently work, see https://github.com/serde-rs/serde/issues/1346
-        FIXME if the Serde issue gets resolved.
+         XXX: Does not currently work, see https://github.com/serde-rs/serde/issues/1346
+         FIXME if the Serde issue gets resolved.
 
-        #[derive(Clone, Eq, PartialEq, Default, Debug, Serialize, Deserialize)]
-        struct Nested {
-            #[serde(flatten)]
-            simple: Simple,
-        }
+         #[derive(Clone, Eq, PartialEq, Default, Debug, Serialize, Deserialize)]
+         struct Nested {
+             #[serde(flatten)]
+             simple: Simple,
+         }
 
-        test(
-            "\
-    name-text: Foo bar
-    x: 1
-    y: 2",
-            &Nested {
-                simple: Simple {
-                    name_text: s("Foo bar"),
-                    x: 1,
-                    y: 2,
-                },
-            },
-        );
-   */
+         test(
+             "\
+     name-text: Foo bar
+     x: 1
+     y: 2",
+             &Nested {
+                 simple: Simple {
+                     name_text: s("Foo bar"),
+                     x: 1,
+                     y: 2,
+                 },
+             },
+         );
+    */
 }
 
 //#[test]

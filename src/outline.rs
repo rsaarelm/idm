@@ -1,34 +1,65 @@
-use serde_derive::{Deserialize, Serialize};
-use std::fmt;
+use serde::{Deserialize, Serialize};
+use serde_bytes::{Bytes, ByteBuf};
+use std::{fmt, ops::Deref};
 
-pub type Section<T> = (T, Outline<T>);
+#[derive(Clone, Default, PartialEq, Eq, Hash)]
+pub struct Section(pub String, pub Outline);
+
+impl serde::Serialize for Section {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        // Convert headline to bytes to trigger special outline
+        // serialization.
+        (Bytes::new(self.0.as_bytes()), &self.1).serialize(serializer)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for Section {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        // Deserialize byte buffer to trigger outline mode, convert to String.
+        let (headline, body): (ByteBuf, Outline) =
+            serde::Deserialize::deserialize(deserializer)?;
+        let headline =
+            String::from_utf8(headline.into_vec()).map_err(serde::de::Error::custom)?;
+        Ok(Section(headline, body))
+    }
+}
 
 /// Canonical Outline datatype.
-#[derive(Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Outline<T>(pub Vec<Section<T>>);
+#[derive(Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct Outline(pub Vec<Section>);
 
-impl<T> std::ops::Deref for Outline<T> {
-    type Target = Vec<Section<T>>;
+impl Deref for Outline {
+    type Target = Vec<Section>;
 
     fn deref(&self) -> &Self::Target {
         &self.0
     }
 }
 
-impl<T> std::iter::FromIterator<(T, Outline<T>)> for Outline<T> {
-    fn from_iter<U: IntoIterator<Item = Section<T>>>(iter: U) -> Self {
-        Outline(iter.into_iter().collect())
+impl std::iter::FromIterator<(String, Outline)> for Outline {
+    fn from_iter<U: IntoIterator<Item = (String, Outline)>>(iter: U) -> Self {
+        Outline(
+            iter.into_iter()
+                .map(|(head, body)| Section(head, body))
+                .collect(),
+        )
     }
 }
 
-impl<T: fmt::Debug> fmt::Debug for Outline<T> {
+impl fmt::Debug for Outline {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fn print<T: fmt::Debug>(
+        fn print(
             f: &mut fmt::Formatter,
             depth: usize,
-            otl: &Outline<T>,
+            otl: &Outline,
         ) -> fmt::Result {
-            for (title, body) in &otl.0 {
+            for Section(title, body) in &otl.0 {
                 for _ in 0..depth {
                     write!(f, "  ")?;
                 }
@@ -50,13 +81,10 @@ impl<T: fmt::Debug> fmt::Debug for Outline<T> {
 #[macro_export(local_inner_macros)]
 macro_rules! outline_elt {
     ([$arg:expr, $($child:tt),+]) => {
-        (Some($arg.into()), outline![$($child),+])
-    };
-    ([, $($child:tt),+]) => {
-        (None, outline![$($child),+])
+        ($arg.into(), outline![$($child),+])
     };
     ($arg:expr) => {
-        (Some($arg.into()), $crate::outline::Outline::default())
+        ($arg.into(), $crate::outline::Outline::default())
     };
 }
 
@@ -66,7 +94,7 @@ macro_rules! outline {
     [$($arg:tt),*] => {
         {
             use std::iter::FromIterator;
-            let ret: $crate::outline::Outline<Option<String>> =
+            let ret: $crate::outline::Outline =
                 $crate::outline::Outline::from_iter(vec![
                     $($crate::outline_elt!($arg)),*
                 ].into_iter());
