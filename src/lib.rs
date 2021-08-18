@@ -6,6 +6,7 @@ pub use error::{Error, Result};
 
 mod lexer;
 mod outline;
+mod parser;
 
 mod ser;
 pub use ser::to_string;
