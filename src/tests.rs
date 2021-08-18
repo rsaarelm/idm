@@ -235,10 +235,9 @@ Qux
   Quux",
         &outline![["Xyzzy", "Plugh", "Blorb"], ["Qux", "Quux"]],
     );
-
 }
 
-//#[test]
+#[test]
 fn ser_outline_with_blanks() {
     test(
         "\
@@ -248,8 +247,8 @@ A
         &outline!["A", ["--", "C"]],
     );
 
-    test("A\n\nB", &outline![["A", ""], "B"]);
-    test("A\n  B\n\n  C", &outline![["A", ["B", ""], "C"]]);
+    test("A\n\nB", &outline!["A", "", "B"]);
+    test("A\n  B\n\n  C", &outline![["A", "B", "", "C"]]);
 }
 
 #[test]

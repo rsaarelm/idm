@@ -104,11 +104,11 @@ impl<'a, 'de> de::Deserializer<'de> for &'a mut Deserializer<'de> {
             log::debug!(
                 "deserialize_bytes at tuple start, switching to line mode"
             );
-            // Force section mode.
-            self.parser.mode = ParsingMode::Line;
             // Go back to parser state before earlier sequence parsing
             // assumptions were made.
             self.checkpoint.restore(&mut self.parser);
+            // Force section mode.
+            self.parser.mode = ParsingMode::Line;
         }
 
         visitor.visit_bytes(self.parser.next_token()?.as_bytes())
@@ -571,10 +571,7 @@ impl<'a> Checkpoint<'a> {
     ///
     /// A common use pattern is to clone the parser state, run some further
     /// parsing, then call `Checkpoint::save` with the old state and the new
-    /// input position. If the input position is unchanged and an earlier
-    /// checkpoint save already exists, a new save will not be made. We want
-    /// to return to the earliest checkpoint saved for a given position when
-    /// doing restore.
+    /// input position.
     ///
     /// This whole thing is sort of terrible and serves a kludgy bit in the
     /// parsing logic.
