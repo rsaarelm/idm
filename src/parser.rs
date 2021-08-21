@@ -102,6 +102,7 @@ impl<'a> Parser<'a> {
             Headline => {
                 if let Some(head) = self.lexer.enter_body()? {
                     // Stay inside body, continue to body lines.
+                    self.lexer.force_block_mode();
                     self.mode = Block;
                     Ok(Cow::from(head))
                 } else {

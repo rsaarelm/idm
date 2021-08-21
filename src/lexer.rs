@@ -294,6 +294,7 @@ impl<'a> Lexer<'a> {
                 panic!("Lexer::dedent can't dedent further");
             }
         }
+        self.in_block_mode = false;
     }
 
     /// Pop out of current indented body when there is only white space left

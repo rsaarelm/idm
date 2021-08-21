@@ -179,14 +179,6 @@ fn ser_section_tuple() {
         "\
 1
 \t2
-\t3",
-        &vec![(1, 2, 3)],
-    );
-
-    test_inexact(
-        "\
-1
-\t2
 3
 \t4",
         &vec![(1, 2), (3, 4)],
@@ -195,9 +187,8 @@ fn ser_section_tuple() {
     test(
         "\
 Lorem
-  --
-    ipsum dolor sit amet
-    consectetur adipiscing elit",
+  ipsum dolor sit amet
+  consectetur adipiscing elit",
         &vec![(
             "Lorem".to_string(),
             "ipsum dolor sit amet\nconsectetur adipiscing elit".to_string(),
@@ -566,7 +557,6 @@ items
     );
 }
 
-/* FIXME
 #[test]
 fn ser_oneshot_section() {
     #[derive(Clone, Eq, PartialEq, Default, Debug, Serialize, Deserialize)]
@@ -583,7 +573,6 @@ Headline
         &vec![("Headline".to_string(), Data { x: 1, y: 2 })],
     );
 }
-*/
 
 #[test]
 fn ser_nesting_contents() {
