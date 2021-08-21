@@ -120,14 +120,14 @@ impl<'a> Parser<'a> {
                         if !headline.chars().all(|c| c.is_whitespace()) {
                             // Must be either inline or block.
                             return err!(
-                                "next_token: Section-shaped balue for key"
+                                "next_token: Section-shaped value for key"
                             );
                         }
                         log::debug!(
                             "next_token: Preparing for outline value for key"
                         );
                         self.lexer.enter_body()?;
-                        self.lexer.dedent();
+                        self.lexer.force_block_mode();
                         self.mode = Block;
                     }
                     Some(Shape::BodyLine(_)) => {
@@ -144,7 +144,7 @@ impl<'a> Parser<'a> {
             }
             DummyKey => {
                 self.mode = Block;
-                self.lexer.dedent();
+                self.lexer.force_block_mode();
                 Ok(Cow::from("_contents"))
             }
         }

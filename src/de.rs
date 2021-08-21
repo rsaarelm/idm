@@ -406,7 +406,7 @@ impl<'a, 'de> de::SeqAccess<'de> for Sequence<'a, 'de> {
                     } else if cls.is_standalone_comment() {
                         self.de.parser.lexer.skip()?;
                     } else if cls.has_comment_head() {
-                        // Consume headline, set things in block mode.
+                        // Consume headline, pop right back.
                         self.de.parser.lexer.enter_body()?;
                         self.de.parser.lexer.dedent();
                         break;

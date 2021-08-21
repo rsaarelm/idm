@@ -23,11 +23,11 @@ pub struct Lexer<'a> {
     /// Segments correspond to previous indentation levels. Dedenting is only
     /// allowed to to segment boundaries. A dedent that does not line up with
     /// the established indent segments is a syntax error.
-    ///
-    /// An empty vector corresponds to the special logical indent level -1.
-    /// Regular level 0 indent is represented by having a single 0-valued
-    /// element at the start of the list.
     indent_segments: Vec<usize>,
+
+    /// When true, elements at current indent level are read as one monolithic
+    /// block.
+    in_block_mode: bool,
 
     /// The remaining input to be lexed.
     input: &'a str,
@@ -35,7 +35,7 @@ pub struct Lexer<'a> {
     /// Inline input position when reading words.
     inline_input: Option<&'a str>,
 
-    /// The original input
+    /// The initial input, used for determining error line numbers.
     input_start: &'a str,
 }
 
@@ -171,6 +171,7 @@ impl<'a> Lexer<'a> {
         Lexer {
             indent_char: Default::default(),
             indent_segments: Default::default(),
+            in_block_mode: true,
             input,
             inline_input: None,
             input_start: input,
@@ -192,16 +193,15 @@ impl<'a> Lexer<'a> {
 
     /// Enter body of current headline.
     ///
-    /// Return the headline if it exists. If the lexer is at the initial
-    /// indent depth -1 or has been `dedent`ed, headline does not exist and
-    /// `None` will be returned.
+    /// Return the headline if it exists. If the lexer is in block mode,
+    /// headline does not exist and `None` will be returned.
     ///
     /// The lexer will enter a deeper indentation depth that must be exited
     /// with `dedent` or `exit_body` even if there are no body lines to the
     /// section.
     ///
-    /// Will fail when there is neither a headline (at depth -1 or indented to
-    /// an empty body) nor any body lines.
+    /// Will fail when there is neither a headline (lexer is in block mode or
+    /// indented to an empty body) nor any body lines.
     ///
     /// It should be reasonably cheap to call `enter_body` on an avergae
     /// input, feel free to use this for probing input with clones of the
@@ -212,7 +212,11 @@ impl<'a> Lexer<'a> {
         // - No headline obviously, but you can still churn indent and dedent if
         //   you want.
         if self.input == "" {
-            self.indent_segments.push(1);
+            if self.in_block_mode {
+                self.in_block_mode = false;
+            } else {
+                self.indent_segments.push(1);
+            }
             return Ok(None);
         }
 
@@ -227,6 +231,14 @@ impl<'a> Lexer<'a> {
 
         self.witness_indentation_char(current_prefix)?;
 
+        if self.in_block_mode {
+            if new_segments.len() > self.indent_segments.len() {
+                return self.err("Lexer::enter_body Unexpected indentation.");
+            }
+            self.in_block_mode = false;
+            return Ok(None);
+        }
+
         // A headline exists if content starts *exactly* at indent string.
         let (content, rest) = parse::line(self.content())?;
 
@@ -239,7 +251,6 @@ impl<'a> Lexer<'a> {
         }
 
         debug_assert!(new_segments.len() == self.indent_segments.len());
-        debug_assert!(new_segments.len() > 0);
 
         // Now we can update input to the next line.
         self.set_input(rest);
@@ -271,16 +282,29 @@ impl<'a> Lexer<'a> {
         Ok(Some(content))
     }
 
-    /// Pop out of current indented body even if there is more body content
-    /// left.
+    /// Force the lexer into block mode.
     ///
-    /// Used to parse content for the special `_contents` struct field.
-    pub fn dedent(&mut self) {
-        log::debug!("Lexer::dedent");
-        self.indent_segments
-            .pop()
-            .expect("Lexer::dedent already at bottom of indent stack");
+    /// All the remaining lines at the current depth will now be parsed as a
+    /// single element.
+    pub fn force_block_mode(&mut self) {
+        log::debug!("Lexer::force_block_mode");
+        self.in_block_mode = true;
     }
+
+    /// Pop out of current indented body.
+    ///
+    /// At depth 0, switch from outline mode to block mode. If already at
+    /// block mode at depth 0, trying to dedent further will panic.
+    pub fn dedent(&mut self) {
+        if self.indent_segments.pop().is_none() {
+            if !self.in_block_mode {
+                self.in_block_mode = true;
+            } else {
+                panic!("Lexer::dedent can't dedent further");
+            }
+        }
+    }
+
 
     /// Pop out of current indented body when there is only white space left
     /// in the body. Will fail if body still has content.
@@ -293,14 +317,11 @@ impl<'a> Lexer<'a> {
         if body_segments.len() < self.indent_segments.len() {
             self.dedent();
             Ok(())
-        } else if !self.indent_segments.is_empty()
-            && self.content().chars().all(|c| c.is_whitespace())
-        {
-            // Drop out to level -1 if at EOF
+        } else if self.indent_segments.is_empty() && self.in_block_mode {
+            panic!("Lexer::exit_body: Exiting body at column 0 block mode");
+        } else if self.content().chars().all(|c| c.is_whitespace()) {
             self.dedent();
             Ok(())
-        } else if self.indent_segments.is_empty() {
-            panic!("Lexer::exit_body: Exiting body at column -1");
         } else {
             self.err("Lexer::exit_body: Unparsed input remains")
         }
@@ -414,8 +435,8 @@ impl<'a> Lexer<'a> {
             return self.err("Lexer::read_into out of depth");
         }
 
-        let has_headline = current_prefix.len() == indent_len
-            && !self.indent_segments.is_empty();
+        let has_headline =
+            current_prefix.len() == indent_len && !self.in_block_mode;
 
         // Set to true at start of loop if a headline exists.
         let mut at_headline = has_headline;
@@ -469,19 +490,17 @@ impl<'a> Lexer<'a> {
     ///
     /// If the indentation does not match the current input string, either
     /// by segment joints or indent char, fail.
-    ///
-    /// An indentation at the fake -1 column can only match indentations at
-    /// column 0.
     fn match_indent(&self, prefix: &str) -> Result<Vec<usize>> {
         // Empty segment is always good.
         if prefix == "" {
-            return Ok(vec![0]);
+            return Ok(Vec::new());
         }
 
-        // At column -1 it's an error to start with any indent other than 0.
-        if self.indent_segments.is_empty() && !prefix.is_empty() {
-            return self
-                .err("Lexer::match_indent First line has nonzero indent");
+        // When in block mode, lines can't introduce an indent level.
+        if self.in_block_mode
+            && prefix.len() > self.indent_segments.iter().sum()
+        {
+            return self.err("Lexer::match_indent Unxpected indent");
         }
 
         // Must be good to unwrap since we've already handled the empty string
@@ -578,9 +597,10 @@ impl<'a> fmt::Debug for Lexer<'a> {
         // printed string
         write!(
             f,
-            "{{ indent: {:?} x {:?}, ",
+            "{{ indent: {:?} x {:?}{}, ",
             self.indent_char.unwrap_or('\0'),
-            self.indent_segments
+            self.indent_segments,
+            if self.in_block_mode { '#' } else { '=' }
         )?;
 
         let input = self.inline_input.unwrap_or(self.input);
@@ -693,10 +713,10 @@ mod tests {
     #[test]
     fn lexer_enter_body() {
         assert_eq!(t("").enter_body(), Ok(None));
-        // Lexing starts at column -1.
 
+        // Lexer starts in block mode
         let mut lexer = t("a");
-        // Get out of the null layer.
+        // Get out of block mode.
         assert_eq!(lexer.enter_body(), Ok(None));
         // Enter the line.
         assert_eq!(lexer.enter_body(), Ok(Some("a")));
@@ -759,7 +779,7 @@ mod tests {
     }
 
     #[test]
-    fn lexer_dedent() {
+    fn lexer_block_mode() {
         // The standard dedent usecase, switch from body line reading mode into
         // block-reading mode in the middle of a struct when you notice you're
         // out of attribute lines.
@@ -776,7 +796,7 @@ struct
         assert_eq!(lexer.read(), Ok("a: 1".into()));
         assert_eq!(lexer.read(), Ok("b: 2".into()));
 
-        lexer.dedent();
+        lexer.force_block_mode();
 
         assert_eq!(lexer.read(), Ok("this\nis\ncontents".into()));
         assert!(lexer.read().is_err());
