@@ -62,25 +62,16 @@ pub enum Shape<'a> {
 
 impl<'a> Shape<'a> {
     pub fn is_blank(&self) -> bool {
-        match self {
-            Shape::BodyLine(s) if s.chars().all(|c| c.is_whitespace()) => true,
-            _ => false,
-        }
+        matches!(self, Shape::BodyLine(s) if s.chars().all(|c| c.is_whitespace()))
     }
 
     pub fn is_standalone_comment(&self) -> bool {
-        match self {
-            Shape::BodyLine(s) if s.starts_with("--") => true,
-            _ => false,
-        }
+        matches!(self, Shape::BodyLine(s) if s.starts_with("--"))
     }
 
     pub fn has_comment_head(&self) -> bool {
-        match self {
-            Shape::BodyLine(s) if s.starts_with("--") => true,
-            Shape::Section(s) if s.starts_with("--") => true,
-            _ => false,
-        }
+        matches!(self, Shape::BodyLine(s) if s.starts_with("--"))
+            || matches!(self, Shape::Section(s) if s.starts_with("--"))
     }
 }
 
@@ -140,7 +131,7 @@ impl<'a> Lexer<'a> {
         // Read word, convert from kebab-case to camel_case.
         let mut word = self.word()?.replace("-", "_");
 
-        if !word.ends_with(":") || word == ":" {
+        if !word.ends_with(':') || word == ":" {
             return self.err(format!("Lexer::key invalid key {:?}", word));
         }
 
@@ -305,7 +296,6 @@ impl<'a> Lexer<'a> {
         }
     }
 
-
     /// Pop out of current indented body when there is only white space left
     /// in the body. Will fail if body still has content.
     ///
@@ -401,7 +391,7 @@ impl<'a> Lexer<'a> {
 // Private methods
 
 impl<'a> Lexer<'a> {
-    fn numerize<'b>(&'b self) -> impl FnOnce(Error) -> Error + 'b {
+    fn numerize(&self) -> impl FnOnce(Error) -> Error + '_ {
         move |e| e.line_num(self.line_num())
     }
 

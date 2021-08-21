@@ -357,7 +357,7 @@ impl<'a, 'de> Sequence<'a, 'de> {
         fields: &'static [&'static str],
     ) -> Sequence<'a, 'de> {
         self.is_struct = true;
-        self.struct_fields = fields.into_iter().map(|&x| x).collect();
+        self.struct_fields = fields.iter().copied().collect();
         self
     }
 
@@ -365,10 +365,8 @@ impl<'a, 'de> Sequence<'a, 'de> {
         log::debug!("exit: {:?}", self.de.parser.lexer);
         if self.de.parser.mode.is_inline() {
             self.de.parser.lexer.exit_words()?;
-        } else {
-            if !self.is_merged {
-                self.de.parser.lexer.exit_body()?;
-            }
+        } else if !self.is_merged {
+            self.de.parser.lexer.exit_body()?;
         }
         self.de.parser.mode = ParsingMode::Block;
         self.de.parser.seq_pos = None;
@@ -399,20 +397,14 @@ impl<'a, 'de> de::SeqAccess<'de> for Sequence<'a, 'de> {
 
         // Consume comments and blanks in outline mode.
         if !self.de.parser.mode.is_inline() {
-            loop {
-                if let Some(cls) = self.de.parser.lexer.classify() {
-                    if cls.is_blank() {
-                        self.de.parser.lexer.skip()?;
-                    } else if cls.is_standalone_comment() {
-                        self.de.parser.lexer.skip()?;
-                    } else if cls.has_comment_head() {
-                        // Consume headline, pop right back.
-                        self.de.parser.lexer.enter_body()?;
-                        self.de.parser.lexer.dedent();
-                        break;
-                    } else {
-                        break;
-                    }
+            while let Some(cls) = self.de.parser.lexer.classify() {
+                if cls.is_blank() || cls.is_standalone_comment() {
+                    self.de.parser.lexer.skip()?;
+                } else if cls.has_comment_head() {
+                    // Consume headline, pop right back.
+                    self.de.parser.lexer.enter_body()?;
+                    self.de.parser.lexer.dedent();
+                    break;
                 } else {
                     break;
                 }
@@ -597,7 +589,6 @@ impl<'a> Checkpoint<'a> {
             // We already stored a jump to this position, do not munge
             // checkpoint with a no-length jump
             log::debug!("Checkpoint::save: At known position, doing nothing");
-            return;
         } else if did_skip {
             log::debug!("Checkpoint::save: Saving state");
             self.span = Some((old_state, new_pos));
