@@ -9,7 +9,10 @@ mod outline;
 mod parser;
 
 mod ser;
-pub use ser::to_string;
+pub use ser::{to_string, to_string_styled, to_string_styled_like, Style};
 
 #[cfg(test)]
 mod tests;
+
+mod util;
+pub use util::guess_indent_style;

@@ -1,17 +1,32 @@
-use crate::{err, Error, Result};
+use crate::{err, guess_indent_style, Error, Result};
 use serde::{ser, Serialize};
 use std::fmt;
 
 /// Maximum line length for inlined compound expressions.
 const MAX_INLINE_SEQ_LENGTH: usize = 80;
 
-pub fn to_string<T>(value: &T) -> Result<String>
-where
-    T: ser::Serialize,
-{
+/// Serialize a value using the default indentation style.
+pub fn to_string<T: ser::Serialize>(value: &T) -> Result<String> {
+    to_string_styled(Default::default(), value)
+}
+
+/// Serialize a value using the given indentation style.
+pub fn to_string_styled<T: ser::Serialize>(
+    style: Style,
+    value: &T,
+) -> Result<String> {
     let mut serializer = Serializer::default();
     let expr = value.serialize(&mut serializer)?;
-    Ok(format!("{}", expr))
+    Ok(format!("{}", Formatted(style, expr)))
+}
+
+/// Serialize a value using indentation style inferred from an existing
+/// IDM sample.
+pub fn to_string_styled_like<T: ser::Serialize>(
+    sample: &str,
+    value: &T,
+) -> Result<String> {
+    to_string_styled(guess_indent_style(sample), value)
 }
 
 /// Descriptor for elements that correspond to an atomic value.
@@ -99,47 +114,6 @@ impl Value {
             }
         }
     }
-
-    /// Print value inline.
-    ///
-    /// Not permitted for `Paragraph`.
-    fn print_inline(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Word(s) => write!(f, "{}", s),
-            Line(s) => write!(f, "{}", s),
-            Paragraph(_) => panic!("print_inline: Paragraphs can't be inlined"),
-        }
-    }
-
-    /// Print value as part of outline at given depth.
-    fn print_outline(
-        &self,
-        f: &mut fmt::Formatter<'_>,
-        depth: i32,
-    ) -> fmt::Result {
-        match self {
-            Word(s) => {
-                indent(f, depth)?;
-                writeln!(f, "{}", s)
-            }
-            Line(s) => {
-                indent(f, depth)?;
-                writeln!(f, "{}", s)
-            }
-            Paragraph(s) => {
-                for line in s.lines() {
-                    if line.trim().is_empty() {
-                        // Don't indent empty lines.
-                        writeln!(f)?;
-                    } else {
-                        indent(f, depth)?;
-                        writeln!(f, "{}", line)?;
-                    }
-                }
-                Ok(())
-            }
-        }
-    }
 }
 
 /// Descriptor for an expression for a possibly structural value.
@@ -159,7 +133,7 @@ enum Expr {
     Section { head: Box<Expr>, body: Vec<Expr> },
 }
 
-use Expr::{Atom, Entry, Section, Seq};
+use Expr::{Atom, Entry, Raw, Section, Seq};
 
 impl Default for Expr {
     fn default() -> Self {
@@ -222,7 +196,7 @@ impl Expr {
             // But you can put a group character with an empty body,
             // ie treat it as a non-listable item.
             Expr::None => true,
-            Expr::Raw(s) => s.is_block(),
+            Raw(s) => s.is_block(),
             Atom(Paragraph(_)) => true,
             Seq(es) => {
                 !es.iter().all(|e| e.is_inline_token())
@@ -277,7 +251,7 @@ impl Expr {
     fn len(&self) -> usize {
         match self {
             Expr::None => 0,
-            Expr::Raw(e) => e.len(),
+            Raw(e) => e.len(),
             Atom(v) => v.len(),
             Entry { key, value } => key.len() + 1 + value.len(),
             Seq(es) if !es.is_empty() => {
@@ -286,103 +260,6 @@ impl Expr {
             Seq(_) => 0,
             Section { head, body } => head.len() + 1 + body.len(),
         }
-    }
-
-    fn print_inline(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Expr::Raw(e) => e.print_inline(f),
-            Atom(v) => v.print_inline(f),
-            Entry { key, value } => {
-                key.print_inline(f)?;
-                write!(f, " ")?;
-                value.print_inline(f)
-            }
-            Seq(es) if !self.is_block() => {
-                for (i, e) in es.iter().enumerate() {
-                    if i != 0 {
-                        write!(f, " ")?;
-                    }
-                    e.print_inline(f)?;
-                }
-                Ok(())
-            }
-            _ => panic!("print_inline: Can't inline expression {:?}", self),
-        }
-    }
-
-    fn print_outline(
-        &self,
-        f: &mut fmt::Formatter<'_>,
-        depth: i32,
-        prev_depth: i32,
-    ) -> fmt::Result {
-        match self {
-            Expr::None => {
-                if prev_depth < depth {
-                    Ok(())
-                } else {
-                    indent(f, depth)?;
-                    writeln!(f, "--")
-                }
-            }
-            Expr::Raw(e) => e.print_outline(f, depth, prev_depth),
-            e if e.is_empty_line() => writeln!(f),
-            Atom(v) => v.print_outline(f, depth),
-            Entry { key, value } => {
-                indent(f, depth)?;
-                key.print_inline(f)?;
-                if value.is_line() {
-                    write!(f, " ")?;
-                    value.print_inline(f)
-                } else if value.is_section() {
-                    writeln!(f)?;
-                    value.print_outline(f, depth + 1, depth)
-                } else {
-                    writeln!(f)?;
-                    value.print_outline(f, depth, depth)
-                }
-            }
-            Section { head, body } => {
-                head.print_outline(f, depth, prev_depth)?;
-                for (i, e) in body.iter().enumerate() {
-                    let prev_depth = if i == 0 { depth } else { depth + 1 };
-                    e.print_outline(f, depth + 1, prev_depth)?;
-                }
-                Ok(())
-            }
-            Seq(es) => {
-                for (i, e) in es.iter().enumerate() {
-                    if e.is_block() {
-                        // Outline sequence
-                        indent(f, depth)?;
-                        writeln!(f, "--")?;
-                        // We can give these all prev_depth = depth since past
-                        // the first one we print the separator comma here.
-                        e.print_outline(f, depth + 1, depth)?;
-                    } else if e.is_section() {
-                        // Outline sequence with headlines as natural
-                        // separators.
-                        //
-                        // Now we do need to set prev_depth based on where in
-                        // the sequence we are
-                        let prev_depth = if i == 0 { depth } else { depth + 1 };
-                        e.print_outline(f, depth + 1, prev_depth)?;
-                    } else {
-                        // Inline sequence
-                        indent(f, depth + 1)?;
-                        e.print_inline(f)?;
-                        writeln!(f)?;
-                    }
-                }
-                Ok(())
-            }
-        }
-    }
-}
-
-impl fmt::Display for Expr {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.print_outline(f, -1, -2)
     }
 }
 
@@ -464,7 +341,7 @@ impl<'a> ser::Serializer for &'a mut Serializer {
     fn serialize_bytes(self, v: &[u8]) -> Result<Expr> {
         let s = std::str::from_utf8(v)
             .map_err(|_| Error::new("Bytes aren't valid UTF-8"))?;
-        Ok(Expr::Raw(Box::new(s.serialize(self)?)))
+        Ok(Raw(Box::new(s.serialize(self)?)))
     }
 
     fn serialize_none(self) -> Result<Expr> {
@@ -826,9 +703,186 @@ impl<'a> ser::SerializeStructVariant for MapSerializer {
     }
 }
 
-fn indent(f: &mut fmt::Formatter<'_>, n: i32) -> fmt::Result {
-    for _ in 0..n {
-        write!(f, "\t")?;
+struct Formatted(Style, Expr);
+
+impl fmt::Display for Formatted {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Formatted(ref style, ref expr) = self;
+        style.expr_outline(f, -1, -2, expr)
     }
-    Ok(())
+}
+
+#[derive(Copy, Clone, Eq, PartialEq, Debug)]
+pub enum Style {
+    Tabs,
+    Spaces(usize),
+}
+
+impl Default for Style {
+    fn default() -> Self {
+        Style::Spaces(2)
+    }
+}
+
+impl fmt::Display for Style {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match *self {
+            Style::Tabs => write!(f, "\t"),
+            Style::Spaces(n) => {
+                debug_assert!(n > 0);
+                for _ in 0..n {
+                    write!(f, " ")?;
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
+impl Style {
+    fn indent(&self, fmt: &'_ mut fmt::Formatter<'_>, n: i32) -> fmt::Result {
+        for _ in 0..n {
+            write!(fmt, "{}", self)?;
+        }
+        Ok(())
+    }
+
+    fn value_inline(
+        &self,
+        f: &mut fmt::Formatter<'_>,
+        v: &Value,
+    ) -> fmt::Result {
+        match v {
+            Word(s) => write!(f, "{}", s),
+            Line(s) => write!(f, "{}", s),
+            Paragraph(_) => panic!("value_inline: Paragraphs can't be inlined"),
+        }
+    }
+
+    /// Print value as part of outline at given depth.
+    fn value_outline(
+        &self,
+        f: &mut fmt::Formatter<'_>,
+        depth: i32,
+        v: &Value,
+    ) -> fmt::Result {
+        match v {
+            Word(s) => {
+                self.indent(f, depth)?;
+                writeln!(f, "{}", s)
+            }
+            Line(s) => {
+                self.indent(f, depth)?;
+                writeln!(f, "{}", s)
+            }
+            Paragraph(s) => {
+                for line in s.lines() {
+                    if line.trim().is_empty() {
+                        // Don't indent empty lines.
+                        writeln!(f)?;
+                    } else {
+                        self.indent(f, depth)?;
+                        writeln!(f, "{}", line)?;
+                    }
+                }
+                Ok(())
+            }
+        }
+    }
+
+    fn expr_inline(
+        &self,
+        f: &mut fmt::Formatter<'_>,
+        expr: &Expr,
+    ) -> fmt::Result {
+        match expr {
+            Raw(e) => self.expr_inline(f, e),
+            Atom(v) => self.value_inline(f, v),
+            Entry { key, value } => {
+                self.expr_inline(f, key)?;
+                write!(f, " ")?;
+                self.expr_inline(f, value)
+            }
+            Seq(es) if !expr.is_block() => {
+                for (i, e) in es.iter().enumerate() {
+                    if i != 0 {
+                        write!(f, " ")?;
+                    }
+                    self.expr_inline(f, e)?;
+                }
+                Ok(())
+            }
+            _ => panic!("expr_inline: Can't inline expression {:?}", expr),
+        }
+    }
+
+    fn expr_outline(
+        &self,
+        f: &mut fmt::Formatter<'_>,
+        depth: i32,
+        prev_depth: i32,
+        expr: &Expr,
+    ) -> fmt::Result {
+        match expr {
+            Expr::None => {
+                if prev_depth < depth {
+                    Ok(())
+                } else {
+                    self.indent(f, depth)?;
+                    writeln!(f, "--")
+                }
+            }
+            Raw(e) => self.expr_outline(f, depth, prev_depth, e),
+            e if e.is_empty_line() => writeln!(f),
+            Atom(v) => self.value_outline(f, depth, v),
+            Entry { key, value } => {
+                self.indent(f, depth)?;
+                self.expr_inline(f, key)?;
+                if value.is_line() {
+                    write!(f, " ")?;
+                    self.expr_inline(f, value)
+                } else if value.is_section() {
+                    writeln!(f)?;
+                    self.expr_outline(f, depth + 1, depth, value)
+                } else {
+                    writeln!(f)?;
+                    self.expr_outline(f, depth, depth, value)
+                }
+            }
+            Section { head, body } => {
+                self.expr_outline(f, depth, prev_depth, head)?;
+                for (i, e) in body.iter().enumerate() {
+                    let prev_depth = if i == 0 { depth } else { depth + 1 };
+                    self.expr_outline(f, depth + 1, prev_depth, e)?;
+                }
+                Ok(())
+            }
+            Seq(es) => {
+                for (i, e) in es.iter().enumerate() {
+                    if e.is_block() {
+                        // Outline sequence
+                        self.indent(f, depth)?;
+                        writeln!(f, "--")?;
+                        // We can give these all prev_depth = depth since past
+                        // the first one we print the separator comma here.
+                        self.expr_outline(f, depth + 1, depth, e)?;
+                    } else if e.is_section() {
+                        // Outline sequence with headlines as natural
+                        // separators.
+                        //
+                        // Now we do need to set prev_depth based on where in
+                        // the sequence we are
+                        let prev_depth = if i == 0 { depth } else { depth + 1 };
+                        self.expr_outline(f, depth + 1, prev_depth, e)?;
+                    } else {
+                        // Inline sequence
+                        self.indent(f, depth + 1)?;
+                        self.expr_inline(f, e)?;
+                        writeln!(f)?;
+                    }
+                }
+                Ok(())
+            }
+        }
+    }
 }
