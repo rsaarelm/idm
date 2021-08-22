@@ -81,24 +81,24 @@ impl<'a> Shape<'a> {
 impl<'a> Lexer<'a> {
     /// Classify the shape at the current lexer position.
     pub fn classify(&self) -> Option<Shape> {
-        log::debug!("Lexer::classify: {:?}", self);
+        log::trace!("Lexer::classify: {:?}", self);
         let mut probe = self.clone();
         match probe.enter_body() {
             Ok(None) => {
                 if probe.exit_body().is_err() {
-                    log::debug!("Lexer::classify: Block");
+                    log::trace!("Lexer::classify: Block");
                     Some(Shape::Block)
                 } else {
-                    log::debug!("Lexer::classify: Empty");
+                    log::trace!("Lexer::classify: Empty");
                     None
                 }
             }
             Ok(Some(content)) => {
                 if probe.exit_body().is_err() {
-                    log::debug!("Lexer::classify: Section");
+                    log::trace!("Lexer::classify: Section");
                     Some(Shape::Section(content))
                 } else {
-                    log::debug!("Lexer::classify: BodyLine");
+                    log::trace!("Lexer::classify: BodyLine");
                     Some(Shape::BodyLine(content))
                 }
             }
@@ -107,7 +107,7 @@ impl<'a> Lexer<'a> {
     }
 
     pub fn exit_words(&mut self) -> Result<()> {
-        log::debug!("Lexer::exit_words: {:?}", self);
+        log::trace!("Lexer::exit_words: {:?}", self);
 
         if self.content() == "" {
             return Ok(());
@@ -144,7 +144,7 @@ impl<'a> Lexer<'a> {
     /// Skip over the next element that would otherwise have been read with
     /// `read`.
     pub fn skip(&mut self) -> Result<()> {
-        log::debug!("Lexer::skip");
+        log::trace!("Lexer::skip");
         // XXX: Unoptimized, does work that gets thrown out.
         self.read()?;
         Ok(())
@@ -171,7 +171,7 @@ impl<'a> Lexer<'a> {
 
     /// Succeed if only whitespace remains of input.
     pub fn end(&mut self) -> Result<()> {
-        log::debug!("Lexer::end");
+        log::trace!("Lexer::end");
         for c in self.content().chars() {
             if !c.is_whitespace() {
                 return self.err("Lexer::end Unparsed input remains");
@@ -198,7 +198,7 @@ impl<'a> Lexer<'a> {
     /// input, feel free to use this for probing input with clones of the
     /// lexer.
     pub fn enter_body(&mut self) -> Result<Option<&'a str>> {
-        log::debug!("Lexer::enter_body: {:?}", self);
+        log::trace!("Lexer::enter_body: {:?}", self);
         // At EOF.
         // - No headline obviously, but you can still churn indent and dedent if
         //   you want.
@@ -278,7 +278,7 @@ impl<'a> Lexer<'a> {
     /// All the remaining lines at the current depth will now be parsed as a
     /// single element.
     pub fn force_block_mode(&mut self) {
-        log::debug!("Lexer::force_block_mode");
+        log::trace!("Lexer::force_block_mode");
         self.in_block_mode = true;
     }
 
@@ -302,7 +302,7 @@ impl<'a> Lexer<'a> {
     ///
     /// Should be cheap to call, feel free to use with cloned lexers.
     pub fn exit_body(&mut self) -> Result<()> {
-        log::debug!("Lexer::exit_body: {:?}", self);
+        log::trace!("Lexer::exit_body: {:?}", self);
         let (body_prefix, _) = parse::indent(self.input)?;
         let body_segments = self.match_indent(body_prefix)?;
         if body_segments.len() < self.indent_segments.len() {
@@ -323,7 +323,7 @@ impl<'a> Lexer<'a> {
     ///
     /// Failure from `word` does not invalidate the lexer.
     pub fn word(&mut self) -> Result<&str> {
-        log::debug!("Lexer::word");
+        log::trace!("Lexer::word");
         let input = self.content();
 
         if input == "" {
@@ -369,7 +369,7 @@ impl<'a> Lexer<'a> {
     /// when you know you want to read the thing at the current point of
     /// input.
     pub fn read(&mut self) -> Result<String> {
-        log::debug!("Lexer::read: {:?}", self);
+        log::trace!("Lexer::read: {:?}", self);
         let mut ret = String::new();
         self.read_into(&mut ret)?;
         if !ret.is_empty() {

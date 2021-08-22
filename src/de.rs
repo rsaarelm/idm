@@ -97,7 +97,7 @@ impl<'a, 'de> de::Deserializer<'de> for &'a mut Deserializer<'de> {
     where
         V: de::Visitor<'de>,
     {
-        // Byte buffer is the marker for outline mode.
+        // Byte buffer is the marker for raw mode used in outlines.
         log::debug!("deserialize_bytes called");
 
         if self.parser.seq_pos == Some(SequencePos::TupleStart) {
@@ -125,9 +125,10 @@ impl<'a, 'de> de::Deserializer<'de> for &'a mut Deserializer<'de> {
     where
         V: de::Visitor<'de>,
     {
-        // Parsing None isn't supported. Options can still be encountered in
-        // struct fields, but it's assumed the field will not be serialized if
-        // it's None.
+        // Any time an Option value is encountered, it's assumed to be
+        // Some(value). Parsing None isn't supported. Options can still be
+        // encountered in struct fields, but it's assumed the field will not
+        // be serialized if it's None.
         visitor.visit_some(self)
     }
 
