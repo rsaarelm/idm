@@ -131,13 +131,14 @@ impl<'a, 'de> de::Deserializer<'de> for &'a mut Deserializer<'de> {
         visitor.visit_some(self)
     }
 
-    fn deserialize_unit<V>(self, visitor: V) -> Result<V::Value>
+    fn deserialize_unit<V>(self, _visitor: V) -> Result<V::Value>
     where
         V: de::Visitor<'de>,
     {
-        // ¯\_(ツ)_/¯
-        // NB. Vec<()> will get you an infinite loop.
-        visitor.visit_unit()
+        // IDM doesn't do empty values well, gonna just not support unit
+        // values for now. Maybe figure out something if this is actually
+        // needed somewhere.
+        unimplemented!()
     }
 
     fn deserialize_unit_struct<V>(
