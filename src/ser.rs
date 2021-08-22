@@ -147,12 +147,8 @@ impl Value {
 enum Expr {
     /// Empty expression.
     None,
-    /// Result of Some(expr)
-    ///
-    /// Mostly can just be unwrapped and recursed, but the special feature is
-    /// that Some values can't be inline tokes, even if the inner value could
-    /// be.
-    Some(Box<Expr>),
+    /// Expression in raw mode (printing outlines). Cannot be inlined.
+    Raw(Box<Expr>),
     /// Non-structural value.
     Atom(Value),
     /// Map or struct entry.
@@ -226,7 +222,7 @@ impl Expr {
             // But you can put a group character with an empty body,
             // ie treat it as a non-listable item.
             Expr::None => true,
-            Expr::Some(s) => s.is_block(),
+            Expr::Raw(s) => s.is_block(),
             Atom(Paragraph(_)) => true,
             Seq(es) => {
                 !es.iter().all(|e| e.is_inline_token())
@@ -278,17 +274,10 @@ impl Expr {
         }
     }
 
-    fn needs_comma_escape(&self) -> bool {
-        match self {
-            Atom(Word(v)) if v.chars().all(|c| c == ',') => true,
-            _ => false,
-        }
-    }
-
     fn len(&self) -> usize {
         match self {
             Expr::None => 0,
-            Expr::Some(e) => e.len(),
+            Expr::Raw(e) => e.len(),
             Atom(v) => v.len(),
             Entry { key, value } => key.len() + 1 + value.len(),
             Seq(es) if !es.is_empty() => {
@@ -301,7 +290,7 @@ impl Expr {
 
     fn print_inline(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Expr::Some(e) => e.print_inline(f),
+            Expr::Raw(e) => e.print_inline(f),
             Atom(v) => v.print_inline(f),
             Entry { key, value } => {
                 key.print_inline(f)?;
@@ -333,16 +322,10 @@ impl Expr {
                     Ok(())
                 } else {
                     indent(f, depth)?;
-                    writeln!(f, ",")
+                    writeln!(f, "--")
                 }
             }
-            Expr::Some(e) if e.needs_comma_escape() => {
-                indent(f, depth)?;
-                write!(f, ",")?;
-                e.print_inline(f)?;
-                writeln!(f)
-            }
-            Expr::Some(e) => e.print_outline(f, depth, prev_depth),
+            Expr::Raw(e) => e.print_outline(f, depth, prev_depth),
             e if e.is_empty_line() => writeln!(f),
             Atom(v) => v.print_outline(f, depth),
             Entry { key, value } => {
@@ -369,13 +352,10 @@ impl Expr {
             }
             Seq(es) => {
                 for (i, e) in es.iter().enumerate() {
-                    let print_separator = i > 0;
                     if e.is_block() {
                         // Outline sequence
-                        if print_separator {
-                            indent(f, depth)?;
-                            writeln!(f, ",")?;
-                        }
+                        indent(f, depth)?;
+                        writeln!(f, "--")?;
                         // We can give these all prev_depth = depth since past
                         // the first one we print the separator comma here.
                         e.print_outline(f, depth + 1, depth)?;
@@ -387,11 +367,6 @@ impl Expr {
                         // the sequence we are
                         let prev_depth = if i == 0 { depth } else { depth + 1 };
                         e.print_outline(f, depth + 1, prev_depth)?;
-                    } else if e.needs_comma_escape() {
-                        indent(f, depth + 1)?;
-                        write!(f, ",")?;
-                        e.print_inline(f)?;
-                        writeln!(f)?;
                     } else {
                         // Inline sequence
                         indent(f, depth + 1)?;
@@ -486,19 +461,21 @@ impl<'a> ser::Serializer for &'a mut Serializer {
         }
     }
 
-    fn serialize_bytes(self, _v: &[u8]) -> Result<Expr> {
-        unimplemented!();
+    fn serialize_bytes(self, v: &[u8]) -> Result<Expr> {
+        let s = std::str::from_utf8(v)
+            .map_err(|_| Error::new("Bytes aren't valid UTF-8"))?;
+        Ok(Expr::Raw(Box::new(s.serialize(self)?)))
     }
 
     fn serialize_none(self) -> Result<Expr> {
-        Ok(Expr::None)
+        return err!("Cannot serialize None values");
     }
 
     fn serialize_some<T>(self, value: &T) -> Result<Expr>
     where
         T: ?Sized + Serialize,
     {
-        Ok(Expr::Some(Box::new(value.serialize(self)?)))
+        value.serialize(self)
     }
 
     fn serialize_unit(self) -> Result<Expr> {
@@ -577,7 +554,6 @@ impl<'a> ser::Serializer for &'a mut Serializer {
         _name: &'static str,
         len: usize,
     ) -> Result<Self::SerializeStruct> {
-        // TODO: Struct fields need different handling
         self.serialize_map(Some(len))
     }
 
