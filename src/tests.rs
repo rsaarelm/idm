@@ -448,6 +448,19 @@ v:
 \t3",
         &Vectored { v: vec![1, 2, 3] },
     );
+
+    #[derive(Clone, Eq, PartialEq, Default, Debug, Serialize, Deserialize)]
+    struct VectoredString {
+        v: Vec<String>,
+    }
+    test_inexact(
+        "\
+v:
+  a
+  b
+  c",
+        &VectoredString { v: vec![s("a"), s("b"), s("c")] },
+    );
 }
 
 #[test]

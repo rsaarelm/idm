@@ -129,6 +129,7 @@ impl<'a> Parser<'a> {
                         );
                         self.lexer.enter_body()?;
                         self.lexer.force_block_mode();
+                        log::debug!("next_token: Entered value body {:?}", self.lexer);
                         self.mode = Block;
                     }
                     Some(Shape::BodyLine(_)) => {

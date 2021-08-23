@@ -230,8 +230,10 @@ impl<'a> Lexer<'a> {
             return Ok(None);
         }
 
+        let (full_line, _) = parse::line(self.input)?;
+
         // A headline exists if content starts *exactly* at indent string.
-        let (content, rest) = parse::line(self.content())?;
+        let (mut content, rest) = parse::line(self.content())?;
 
         // Current indent is longer than expected indent.
         // - Headline is None.
@@ -251,9 +253,13 @@ impl<'a> Lexer<'a> {
         //  - Cannot have children (because of how indent for blank lines is
         //    determined), set synthetic +1 indent level.
         //  - Return Some("") for headline
-        if content.chars().all(|c| c.is_whitespace()) {
+        if full_line.chars().all(|c| c.is_whitespace()) {
             self.indent_segments.push(1);
             return Ok(Some(""));
+        } else if content.chars().all(|c| c.is_whitespace()) {
+            // There's content on the line, but it's all been skipped over.
+            // Indent for real, but make sure there's no trailing whitespace.
+            content = "";
         }
 
         // Headline indent as expected, headline has content
@@ -711,6 +717,20 @@ mod tests {
         assert_eq!(lexer.enter_body(), Ok(None));
         // Enter the line.
         assert_eq!(lexer.enter_body(), Ok(Some("a")));
+
+        let mut lexer = t("a\n  b");
+        assert_eq!(lexer.enter_body(), Ok(None));
+        assert_eq!(lexer.enter_body(), Ok(Some("a")));
+        assert_eq!(lexer.enter_body(), Ok(Some("b")));
+    }
+
+    #[test]
+    fn lexer_read_word_enter_body() {
+        let mut lexer = t("a\n  b");
+        assert_eq!(lexer.enter_body(), Ok(None));
+        assert_eq!(lexer.word(), Ok("a"));
+        assert_eq!(lexer.enter_body(), Ok(Some("")));
+        assert_eq!(lexer.enter_body(), Ok(Some("b")));
     }
 
     #[test]
