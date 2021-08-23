@@ -5,7 +5,10 @@ mod error;
 pub use error::{Error, Result};
 
 mod lexer;
+
 mod outline;
+pub use outline::{Raw, Outline, Section};
+
 mod parser;
 
 mod ser;

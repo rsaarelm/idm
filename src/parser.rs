@@ -80,7 +80,6 @@ impl<'a> Parser<'a> {
     /// This can be very expensive, it can read a whole file, so only use it
     /// when you know you need it.
     pub fn next_token(&mut self) -> Result<Cow<str>> {
-        log::debug!("next_token: {:?}", self.lexer);
         use ParsingMode::*;
 
         if self.lexer.at_eof() {
@@ -124,18 +123,11 @@ impl<'a> Parser<'a> {
                                 "next_token: Section-shaped value for key"
                             );
                         }
-                        log::debug!(
-                            "next_token: Preparing for outline value for key"
-                        );
                         self.lexer.enter_body()?;
                         self.lexer.force_block_mode();
-                        log::debug!("next_token: Entered value body {:?}", self.lexer);
                         self.mode = Block;
                     }
                     Some(Shape::BodyLine(_)) => {
-                        log::debug!(
-                            "next_token: Preparing for inline value for key"
-                        );
                         self.mode = Line;
                     }
                     Some(Shape::Block) => {

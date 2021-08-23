@@ -1,34 +1,64 @@
 use serde::{Deserialize, Serialize};
 use serde_bytes::{ByteBuf, Bytes};
-use std::{fmt, ops::Deref};
+use std::{fmt, ops::Deref, ops::DerefMut};
 
+/// Wrapper type for section headlines that will force an IDM structure
+/// including it to be parsed in raw mode.
 #[derive(Clone, Default, PartialEq, Eq, Hash)]
-pub struct Section(pub String, pub Outline);
+pub struct Raw<T>(pub T);
 
-impl serde::Serialize for Section {
+impl<T: AsRef<[u8]>> serde::Serialize for Raw<T> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
     {
         // Convert headline to bytes to trigger special outline
         // serialization.
-        (Bytes::new(self.0.as_bytes()), &self.1).serialize(serializer)
+        Bytes::new(self.0.as_ref()).serialize(serializer)
     }
 }
 
-impl<'de> serde::Deserialize<'de> for Section {
+impl<'de> serde::Deserialize<'de> for Raw<String> {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
         // Deserialize byte buffer to trigger outline mode, convert to String.
-        let (headline, body): (ByteBuf, Outline) =
-            serde::Deserialize::deserialize(deserializer)?;
-        let headline = String::from_utf8(headline.into_vec())
+        let ret: ByteBuf = serde::Deserialize::deserialize(deserializer)?;
+        let ret = String::from_utf8(ret.into_vec())
             .map_err(serde::de::Error::custom)?;
-        Ok(Section(headline, body))
+        Ok(Raw(ret))
     }
 }
+
+impl<T> Deref for Raw<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<T> DerefMut for Raw<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl<T: fmt::Debug> fmt::Debug for Raw<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        T::fmt(self, f)
+    }
+}
+
+impl<T: fmt::Display> fmt::Display for Raw<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        T::fmt(self, f)
+    }
+}
+
+#[derive(Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct Section(pub Raw<String>, pub Outline);
 
 /// Canonical Outline datatype.
 #[derive(Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -46,7 +76,7 @@ impl std::iter::FromIterator<(String, Outline)> for Outline {
     fn from_iter<U: IntoIterator<Item = (String, Outline)>>(iter: U) -> Self {
         Outline(
             iter.into_iter()
-                .map(|(head, body)| Section(head, body))
+                .map(|(head, body)| Section(Raw(head), body))
                 .collect(),
         )
     }

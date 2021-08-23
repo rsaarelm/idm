@@ -2,9 +2,6 @@ use crate::{err, guess_indent_style, Error, Result};
 use serde::{ser, Serialize};
 use std::fmt;
 
-/// Maximum line length for inlined compound expressions.
-const MAX_INLINE_SEQ_LENGTH: usize = 80;
-
 /// Serialize a value using the default indentation style.
 pub fn to_string<T: ser::Serialize>(value: &T) -> Result<String> {
     to_string_styled(Default::default(), value)
@@ -53,9 +50,7 @@ use Value::*;
 impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Word(s) => write!(f, "{}", s),
-            Line(s) => write!(f, "{}", s),
-            Paragraph(s) => write!(f, "{}", s),
+            Word(s) | Line(s) | Paragraph(s) => write!(f, "{}", s),
         }
     }
 }
@@ -98,21 +93,44 @@ impl Value {
         Value::new(format!("{}", item))
     }
 
-    fn len(&self) -> usize {
+    fn as_str(&self) -> &str {
         match self {
-            Word(s) => {
-                debug_assert!(!s.is_empty());
-                s.len()
-            }
-            Line(s) => {
-                debug_assert!(!s.is_empty());
-                s.len()
-            }
-            Paragraph(s) => {
-                debug_assert!(!s.is_empty());
-                s.len()
-            }
+            Word(s) => s,
+            Line(s) => s,
+            Paragraph(s) => s,
         }
+    }
+
+    fn is_line_or_section(&self) -> bool {
+        if let Paragraph(s) = self {
+            // Non-empty line must start with non-whitespace.
+            assert!(s
+                .lines()
+                .next()
+                .unwrap()
+                .chars()
+                .next()
+                .map_or(true, |c| !c.is_whitespace()));
+
+            // TODO: String literal formatter in construction that actually
+            // validates this stuff and errors out early if you try to feed
+            // invalid strings.
+            for line in s.lines().skip(1) {
+                if !line.chars().next().map_or(true, |c| c.is_whitespace()) {
+                    // A line after the first one was not indented so this
+                    // value can not pass as a section.
+                    return false;
+                }
+            }
+
+            true
+        } else {
+            true
+        }
+    }
+
+    fn is_blank_line(&self) -> bool {
+        matches!(self, Paragraph(s) if s == "\n")
     }
 }
 
@@ -125,15 +143,16 @@ enum Expr {
     Raw(Box<Expr>),
     /// Non-structural value.
     Atom(Value),
-    /// Map or struct entry.
-    Entry { key: Box<Expr>, value: Box<Expr> },
-    /// Expression sequence for a list or a tuple.
+    /// Expression sequence for a variable element count sequence.
     Seq(Vec<Expr>),
-    /// Outline expression with headline and body.
-    Section { head: Box<Expr>, body: Vec<Expr> },
+    /// Expression sequence for a fixed element count tuple.
+    ///
+    /// Also used for key/value pairs. Can be formatted as a section, unlike
+    /// `Seq`.
+    Tuple(Vec<Expr>),
 }
 
-use Expr::{Atom, Entry, Raw, Section, Seq};
+use Expr::{Atom, Raw, Seq, Tuple};
 
 impl Default for Expr {
     fn default() -> Self {
@@ -157,8 +176,7 @@ impl Expr {
     /// to.
     fn push(&mut self, e: Expr) {
         match self {
-            Seq(es) => es.push(e),
-            Section { body, .. } => body.push(e),
+            Seq(es) | Tuple(es) => es.push(e),
             _ => panic!("Can't append to this expr type"),
         }
     }
@@ -166,7 +184,7 @@ impl Expr {
     /// Push elements from a Seq expr into self.
     fn concat(&mut self, e: Expr) {
         match e {
-            Seq(es) => {
+            Seq(es) | Tuple(es) => {
                 for e in es.into_iter() {
                     self.push(e);
                 }
@@ -176,10 +194,7 @@ impl Expr {
     }
 
     fn is_none(&self) -> bool {
-        match self {
-            Expr::None => true,
-            _ => false,
-        }
+        matches!(self, Expr::None)
     }
 
     fn is_inline_token(&self) -> bool {
@@ -189,77 +204,305 @@ impl Expr {
         }
     }
 
-    /// Expression needs multiple lines at the base indent depth.
-    fn is_block(&self) -> bool {
+    /// Expression looks like a comment line and needs to be escaped in a
+    /// sequence.
+    fn looks_like_comment(&self) -> bool {
+        // NB. Raw exprs are *not* checked here, whenever you're parsing a raw
+        // item, it's expected from the type schema that it might be
+        // comment-like, and it should not be separately escaped by things
+        // that look for comment-looking things.
         match self {
-            // None doesn't actually make sense showing up on its own.
-            // But you can put a group character with an empty body,
-            // ie treat it as a non-listable item.
-            Expr::None => true,
-            Raw(s) => s.is_block(),
-            Atom(Paragraph(_)) => true,
-            Seq(es) => {
-                !es.iter().all(|e| e.is_inline_token())
-                    || self.len() > MAX_INLINE_SEQ_LENGTH
+            Atom(v) => v.as_str().starts_with("--"),
+            Tuple(es) | Seq(es) => {
+                es.first().map_or(false, |x| x.looks_like_comment())
             }
             _ => false,
         }
     }
 
-    /// Expression can be printed as single line.
-    fn is_line(&self) -> bool {
-        !self.is_block() && !self.is_section()
-    }
-
-    fn is_section(&self) -> bool {
+    /// Like `can_be_inlined`, but comment-looking things are fine.
+    fn can_be_tail_lined(&self) -> bool {
         match self {
-            Section { .. } => true,
-            Entry { value, .. } => !value.is_line(),
-            _ => false,
+            Expr::None => false,
+            // Don't check for comment-likeness for Raws, just punt to
+            // tail-lined again for the inside.
+            Raw(e) if e.is_blank_line() => true,
+            Raw(e) => e.can_be_tail_lined(),
+            Atom(Paragraph(_)) => false,
+            Atom(_) => true,
+            // Seqs are simple, everything must be homogeneous
+            Seq(es) => es.iter().all(|e| e.is_inline_token()),
+            // Tuples are more complex, last item just needs to be inlinable.
+            Tuple(es) => {
+                for (i, e) in es.iter().enumerate() {
+                    if i == es.len() - 1 {
+                        // Last item of a tuple, can be an line item instead
+                        // of a word item.
+                        if !e.can_be_tail_lined() {
+                            return false;
+                        }
+                    } else {
+                        if !e.is_inline_token() {
+                            return false;
+                        }
+                    }
+                }
+                true
+            }
         }
     }
 
-    fn is_seq(&self) -> bool {
-        match self {
-            Seq(_) => true,
-            _ => false,
-        }
+    /// Expression can be printed in inline form.
+    ///
+    /// (Does not check for maximum length, just the logical inlinability.)
+    fn can_be_inlined(&self) -> bool {
+        !self.looks_like_comment() && self.can_be_tail_lined()
     }
 
-    fn is_matrix(&self) -> bool {
+    /// Expr is either a line or a section with that touches the left margin
+    /// with only a single point at the start of the expr.
+    fn is_line_or_section(&self) -> bool {
+        // NB. This *does not apply* for seqs that have a single element but
+        // are not inlineable, even though they look line-like when printed
+        // out. The parser seeing a single line when it expects a sequence
+        // cannot tell it's looking at a single line element instead of
+        // multiple inlined word elements.
         match self {
-            Seq(es) => es.iter().any(|e| e.is_seq()),
+            x if x.looks_like_comment() => false,
+            // Pairs are formatted as sections if the head can be inlined.
+            Tuple(es) => {
+                es.len() == 2
+                    && es.iter().next().map_or(false, |e| e.can_be_inlined())
+            }
+
+            // String literals can also be section like if they're literally
+            // section-shaped, ie. every line after first is indented.
+            Atom(v) => v.is_line_or_section(),
+            Raw(e) => e.is_line_or_section(),
+            // Out of the complex expr types, only tuples can be section-like.
             _ => false,
         }
     }
 
     fn is_empty(&self) -> bool {
-        match self {
-            Atom(x) if x.len() == 0 => true,
-            Seq(es) if es.is_empty() => true,
-            _ => false,
-        }
+        matches!(self, Expr::None)
+            || matches!(self, Tuple(es) | Seq(es) if es.is_empty())
     }
 
-    fn is_empty_line(&self) -> bool {
-        match self {
-            Atom(Paragraph(x)) if x == "\n" => true,
-            _ => false,
-        }
+    fn is_blank_line(&self) -> bool {
+        matches!(self, Atom(Paragraph(x)) if x == "\n")
+            || matches!(self, Raw(e) if e.is_blank_line())
     }
+}
 
-    fn len(&self) -> usize {
-        match self {
-            Expr::None => 0,
-            Raw(e) => e.len(),
-            Atom(v) => v.len(),
-            Entry { key, value } => key.len() + 1 + value.len(),
-            Seq(es) if !es.is_empty() => {
-                es.iter().map(|e| e.len()).sum::<usize>() + es.len() - 1
+struct Formatted(Style, Expr);
+
+impl fmt::Display for Formatted {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Formatted(ref style, ref expr) = self;
+        style.expr_outline(f, 0, expr)
+    }
+}
+
+#[derive(Copy, Clone, Eq, PartialEq, Debug)]
+pub enum Style {
+    Tabs,
+    Spaces(usize),
+}
+
+impl Default for Style {
+    fn default() -> Self {
+        Style::Spaces(2)
+    }
+}
+
+impl fmt::Display for Style {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match *self {
+            Style::Tabs => write!(f, "\t"),
+            Style::Spaces(n) => {
+                debug_assert!(n > 0);
+                for _ in 0..n {
+                    write!(f, " ")?;
+                }
+                Ok(())
             }
-            Seq(_) => 0,
-            Section { head, body } => head.len() + 1 + body.len(),
         }
+    }
+}
+
+impl Style {
+    fn indent(&self, fmt: &'_ mut fmt::Formatter<'_>, n: i32) -> fmt::Result {
+        for _ in 0..n {
+            write!(fmt, "{}", self)?;
+        }
+        Ok(())
+    }
+
+    fn value_inline(
+        &self,
+        f: &mut fmt::Formatter<'_>,
+        v: &Value,
+    ) -> fmt::Result {
+        match v {
+            Word(s) => write!(f, "{}", s),
+            Line(s) => write!(f, "{}", s),
+            v if v.is_blank_line() => Ok(()),
+            Paragraph(_) => panic!("value_inline: Paragraphs can't be inlined"),
+        }
+    }
+
+    /// Print value as part of outline at given depth.
+    fn value_outline(
+        &self,
+        f: &mut fmt::Formatter<'_>,
+        depth: i32,
+        v: &Value,
+    ) -> fmt::Result {
+        match v {
+            Word(s) => {
+                self.indent(f, depth)?;
+                writeln!(f, "{}", s)
+            }
+            Line(s) => {
+                self.indent(f, depth)?;
+                writeln!(f, "{}", s)
+            }
+            Paragraph(s) => {
+                for line in s.lines() {
+                    if line.trim().is_empty() {
+                        // Don't indent empty lines.
+                        writeln!(f)?;
+                    } else {
+                        self.indent(f, depth)?;
+                        writeln!(f, "{}", line)?;
+                    }
+                }
+                Ok(())
+            }
+        }
+    }
+
+    /// Print an expression in inline form right where the cursor is now.
+    fn expr_inline(
+        &self,
+        f: &mut fmt::Formatter<'_>,
+        expr: &Expr,
+    ) -> fmt::Result {
+        match expr {
+            Raw(e) => self.expr_inline(f, e),
+            Atom(v) => self.value_inline(f, v),
+            Seq(es) | Tuple(es) if expr.can_be_inlined() => {
+                for (i, e) in es.iter().enumerate() {
+                    if i != 0 {
+                        write!(f, " ")?;
+                    }
+                    self.expr_inline(f, e)?;
+                }
+                Ok(())
+            }
+            _ => panic!("expr_inline: Can't inline expression {:?}", expr),
+        }
+    }
+
+    /// Print an expression in outline form indented to the given depth.
+    ///
+    /// Does not do any escaping for block-shaped or comment-looking exprs.
+    /// Use `expr_pointed` if you need that.
+    fn expr_outline(
+        &self,
+        f: &mut fmt::Formatter<'_>,
+        depth: i32,
+        expr: &Expr,
+    ) -> fmt::Result {
+        match expr {
+            Expr::None => Ok(()),
+            e if e.is_blank_line() => writeln!(f),
+            Raw(e) => self.expr_outline(f, depth, e),
+            Atom(v) => self.value_outline(f, depth, v),
+            Seq(es) | Tuple(es) => {
+                if expr.is_line_or_section() {
+                    match es.as_slice() {
+                        [head, body] => {
+                            if head.is_blank_line() {
+                                writeln!(f)?;
+                            } else {
+                                self.indent(f, depth)?;
+                                self.expr_inline(f, head)?;
+                                writeln!(f)?;
+                            }
+
+                            self.expr_outline(f, depth + 1, body)?;
+
+                            Ok(())
+                        }
+                        _ => {
+                            panic!("expr_outline: Section tuple is not a pair")
+                        }
+                    }
+                } else {
+                    for e in es {
+                        self.sequence_expr(f, depth, e)?;
+                    }
+                    Ok(())
+                }
+            }
+        }
+    }
+
+    /// Print an expression at given depth, ensuring that it shows up as a
+    /// valid sequence element with a single margin point.
+    ///
+    /// Block-like elements that don't have an unique margin point at the
+    /// start will get a synthetic `--` added to the top and the rest of the
+    /// value indented. Exprs that start with `--` and would be mistaken as
+    /// comments are escaped in similar manner, by adding the extra `--` above
+    /// them.
+    ///
+    /// Section or line shaped expressions that don't look like comments will
+    /// be printed as is. Expressions will be printed in inline form if
+    /// possible.
+    fn sequence_expr(
+        &self,
+        f: &mut fmt::Formatter<'_>,
+        depth: i32,
+        expr: &Expr,
+    ) -> fmt::Result {
+        if expr.is_blank_line() {
+            writeln!(f)?;
+            return Ok(());
+        }
+
+        if expr.can_be_inlined() {
+            // Doesn't look like a comment, doesn't have Raw as part of
+            // sequence, doesn't have non-inlineable sequence nesting.
+            self.indent(f, depth)?;
+            self.expr_inline(f, expr)?;
+            writeln!(f)?;
+            return Ok(());
+        }
+
+        if expr.is_line_or_section() {
+            // Section-looking things can be printed without escaping the
+            // depth. Again, the predicate isn't true if the expr looks like a
+            // comment.
+            self.expr_outline(f, depth, expr)?;
+            return Ok(());
+        }
+
+        if matches!(expr, Expr::None) {
+            return Ok(());
+        }
+
+        // If we fell through here, it's not an inlineable expr nor a section.
+        // Either it looks like a comment and needs to be escaped, or it's a
+        // multi-line block. Treatment is the same in both cases, insert a
+        // separator comment line and print the expr normally under it.
+
+        self.indent(f, depth)?;
+        writeln!(f, "--")?;
+        self.expr_outline(f, depth + 1, expr)?;
+        Ok(())
     }
 }
 
@@ -340,7 +583,10 @@ impl<'a> ser::Serializer for &'a mut Serializer {
 
     fn serialize_bytes(self, v: &[u8]) -> Result<Expr> {
         let s = std::str::from_utf8(v)
-            .map_err(|_| Error::new("Bytes aren't valid UTF-8"))?;
+            .map_err(|_| Error::new("serialize_bytes: Invalid UTF-8"))?;
+        if s.find('\n').is_some() {
+            return err!("serialize_bytes: Cannot have multiline raw values.");
+        }
         Ok(Raw(Box::new(s.serialize(self)?)))
     }
 
@@ -448,66 +694,25 @@ impl<'a> ser::Serializer for &'a mut Serializer {
 #[derive(Default)]
 struct SeqSerializer {
     idx: usize,
-    len: usize,
     /// Will contain the first item if this is an indent-style tuple.
     acc: Expr,
 }
 
 impl SeqSerializer {
-    pub fn new(len: usize) -> SeqSerializer {
-        SeqSerializer {
-            len,
-            ..Default::default()
-        }
+    pub fn new(_len: usize) -> SeqSerializer {
+        Default::default()
     }
 
     fn serialize_tuple_element<T>(&mut self, value: &T) -> Result<()>
     where
         T: ?Sized + Serialize,
     {
-        let elt = value.serialize(&mut Serializer::default())?;
-
-        // Got some early exits coming ahead, so let's just increment right
-        // now and write the logic below aginst the + 1 value.
+        if self.idx == 0 {
+            self.acc = Tuple(Vec::new());
+        }
         self.idx += 1;
 
-        if self.idx == 1 {
-            // Let's see how we kick things off.
-            if elt.is_inline_token() {
-                // We might be able to inline the whole thing, let's go with
-                // seq.
-                self.acc = Seq(vec![elt]);
-            } else if elt.is_seq() {
-                // Also the first thing is already a seq, let's go with this
-                // again.
-                self.acc = Seq(vec![elt]);
-            } else {
-                // Otherwise start in section shape
-                self.acc = Section {
-                    head: Box::new(elt),
-                    body: Vec::new(),
-                };
-            }
-            return Ok(());
-        }
-
-        // Special trick: If the last tuple item is a seq, we concatenate it
-        // to the current tuple instead of adding it as its own object.
-        //
-        // (Don't do this for tuples that are seq-like rather than sections)
-        if self.idx > 1 && self.idx == self.len && !self.acc.is_matrix() {
-            match elt {
-                Seq(es) => {
-                    for e in es {
-                        self.acc.push(e);
-                    }
-                    return Ok(());
-                }
-                _ => {}
-            }
-        }
-
-        self.acc.push(elt);
+        self.acc.push(value.serialize(&mut Serializer::default())?);
         Ok(())
     }
 }
@@ -600,7 +805,7 @@ impl<'a> ser::SerializeMap for MapSerializer {
         T: ?Sized + Serialize,
     {
         let key = key.serialize(&mut Serializer::default())?;
-        if key.is_line() {
+        if key.can_be_inlined() {
             // Put a dummy value, fill it in in serialize_value.
             self.values.push((key, Expr::None));
             Ok(())
@@ -633,10 +838,7 @@ impl<'a> ser::SerializeMap for MapSerializer {
     fn end(self) -> Result<Expr> {
         let mut ret = Seq(Vec::new());
         for (key, value) in self.values.into_iter() {
-            ret.push(Entry {
-                key: Box::new(key),
-                value: Box::new(value),
-            });
+            ret.push(Tuple(vec![key, value]));
         }
         Ok(ret)
     }
@@ -674,10 +876,7 @@ impl<'a> ser::SerializeStruct for MapSerializer {
     fn end(self) -> Result<Expr> {
         let mut ret = Seq(Vec::new());
         for (key, value) in self.values.into_iter() {
-            ret.push(Entry {
-                key: Box::new(key),
-                value: Box::new(value),
-            });
+            ret.push(Tuple(vec![key, value]));
         }
         // Put contents after all the entries if there was one
         if !self.contents.is_none() {
@@ -700,189 +899,5 @@ impl<'a> ser::SerializeStructVariant for MapSerializer {
 
     fn end(self) -> Result<Expr> {
         ser::SerializeStruct::end(self)
-    }
-}
-
-struct Formatted(Style, Expr);
-
-impl fmt::Display for Formatted {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let Formatted(ref style, ref expr) = self;
-        style.expr_outline(f, -1, -2, expr)
-    }
-}
-
-#[derive(Copy, Clone, Eq, PartialEq, Debug)]
-pub enum Style {
-    Tabs,
-    Spaces(usize),
-}
-
-impl Default for Style {
-    fn default() -> Self {
-        Style::Spaces(2)
-    }
-}
-
-impl fmt::Display for Style {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match *self {
-            Style::Tabs => write!(f, "\t"),
-            Style::Spaces(n) => {
-                debug_assert!(n > 0);
-                for _ in 0..n {
-                    write!(f, " ")?;
-                }
-                Ok(())
-            }
-        }
-    }
-}
-
-impl Style {
-    fn indent(&self, fmt: &'_ mut fmt::Formatter<'_>, n: i32) -> fmt::Result {
-        for _ in 0..n {
-            write!(fmt, "{}", self)?;
-        }
-        Ok(())
-    }
-
-    fn value_inline(
-        &self,
-        f: &mut fmt::Formatter<'_>,
-        v: &Value,
-    ) -> fmt::Result {
-        match v {
-            Word(s) => write!(f, "{}", s),
-            Line(s) => write!(f, "{}", s),
-            Paragraph(_) => panic!("value_inline: Paragraphs can't be inlined"),
-        }
-    }
-
-    /// Print value as part of outline at given depth.
-    fn value_outline(
-        &self,
-        f: &mut fmt::Formatter<'_>,
-        depth: i32,
-        v: &Value,
-    ) -> fmt::Result {
-        match v {
-            Word(s) => {
-                self.indent(f, depth)?;
-                writeln!(f, "{}", s)
-            }
-            Line(s) => {
-                self.indent(f, depth)?;
-                writeln!(f, "{}", s)
-            }
-            Paragraph(s) => {
-                for line in s.lines() {
-                    if line.trim().is_empty() {
-                        // Don't indent empty lines.
-                        writeln!(f)?;
-                    } else {
-                        self.indent(f, depth)?;
-                        writeln!(f, "{}", line)?;
-                    }
-                }
-                Ok(())
-            }
-        }
-    }
-
-    fn expr_inline(
-        &self,
-        f: &mut fmt::Formatter<'_>,
-        expr: &Expr,
-    ) -> fmt::Result {
-        match expr {
-            Raw(e) => self.expr_inline(f, e),
-            Atom(v) => self.value_inline(f, v),
-            Entry { key, value } => {
-                self.expr_inline(f, key)?;
-                write!(f, " ")?;
-                self.expr_inline(f, value)
-            }
-            Seq(es) if !expr.is_block() => {
-                for (i, e) in es.iter().enumerate() {
-                    if i != 0 {
-                        write!(f, " ")?;
-                    }
-                    self.expr_inline(f, e)?;
-                }
-                Ok(())
-            }
-            _ => panic!("expr_inline: Can't inline expression {:?}", expr),
-        }
-    }
-
-    fn expr_outline(
-        &self,
-        f: &mut fmt::Formatter<'_>,
-        depth: i32,
-        prev_depth: i32,
-        expr: &Expr,
-    ) -> fmt::Result {
-        match expr {
-            Expr::None => {
-                if prev_depth < depth {
-                    Ok(())
-                } else {
-                    self.indent(f, depth)?;
-                    writeln!(f, "--")
-                }
-            }
-            Raw(e) => self.expr_outline(f, depth, prev_depth, e),
-            e if e.is_empty_line() => writeln!(f),
-            Atom(v) => self.value_outline(f, depth, v),
-            Entry { key, value } => {
-                self.indent(f, depth)?;
-                self.expr_inline(f, key)?;
-                if value.is_line() {
-                    write!(f, " ")?;
-                    self.expr_inline(f, value)
-                } else if value.is_section() {
-                    writeln!(f)?;
-                    self.expr_outline(f, depth + 1, depth, value)
-                } else {
-                    writeln!(f)?;
-                    self.expr_outline(f, depth, depth, value)
-                }
-            }
-            Section { head, body } => {
-                self.expr_outline(f, depth, prev_depth, head)?;
-                for (i, e) in body.iter().enumerate() {
-                    let prev_depth = if i == 0 { depth } else { depth + 1 };
-                    self.expr_outline(f, depth + 1, prev_depth, e)?;
-                }
-                Ok(())
-            }
-            Seq(es) => {
-                for (i, e) in es.iter().enumerate() {
-                    if e.is_block() {
-                        // Outline sequence
-                        self.indent(f, depth)?;
-                        writeln!(f, "--")?;
-                        // We can give these all prev_depth = depth since past
-                        // the first one we print the separator comma here.
-                        self.expr_outline(f, depth + 1, depth, e)?;
-                    } else if e.is_section() {
-                        // Outline sequence with headlines as natural
-                        // separators.
-                        //
-                        // Now we do need to set prev_depth based on where in
-                        // the sequence we are
-                        let prev_depth = if i == 0 { depth } else { depth + 1 };
-                        self.expr_outline(f, depth + 1, prev_depth, e)?;
-                    } else {
-                        // Inline sequence
-                        self.indent(f, depth + 1)?;
-                        self.expr_inline(f, e)?;
-                        writeln!(f)?;
-                    }
-                }
-                Ok(())
-            }
-        }
     }
 }

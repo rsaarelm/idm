@@ -27,7 +27,6 @@ pub struct Deserializer<'de> {
 impl<'de> Deserializer<'de> {
     pub fn new(input: &'de str) -> Deserializer<'de> {
         let parser = Parser::new(input);
-        log::debug!("\x1b[1;32mDeserializing {:?}\x1b[0m", parser.lexer);
         Deserializer {
             parser,
             checkpoint: Default::default(),
@@ -98,12 +97,7 @@ impl<'a, 'de> de::Deserializer<'de> for &'a mut Deserializer<'de> {
         V: de::Visitor<'de>,
     {
         // Byte buffer is the marker for raw mode used in outlines.
-        log::debug!("deserialize_bytes called");
-
         if self.parser.seq_pos == Some(SequencePos::TupleStart) {
-            log::debug!(
-                "deserialize_bytes at tuple start, switching to line mode"
-            );
             // Go back to parser state before earlier sequence parsing
             // assumptions were made.
             self.checkpoint.restore(&mut self.parser);
@@ -170,7 +164,6 @@ impl<'a, 'de> de::Deserializer<'de> for &'a mut Deserializer<'de> {
     {
         use Shape::*;
         self.parser.verify_seq_startable()?;
-        log::debug!("deserialize_seq: {:?}", self.parser.lexer);
 
         // NB: Merging is only supported for variable-length seqs, not tuples.
         // It would mess up tuple/fixed-width-array matrices otherwise.
@@ -184,7 +177,6 @@ impl<'a, 'de> de::Deserializer<'de> for &'a mut Deserializer<'de> {
 
         match self.parser.lexer.classify() {
             None => {
-                log::debug!("deserialize_seq: EOF, treating as block");
                 self.parser.mode = ParsingMode::Block;
                 self.parser.lexer.enter_body()?;
             }
@@ -192,18 +184,15 @@ impl<'a, 'de> de::Deserializer<'de> for &'a mut Deserializer<'de> {
                 if !headline.starts_with("--") {
                     return err!("deserialize_seq: Both headline and body");
                 } else {
-                    log::debug!("deserialize_seq: Block with comment headline");
                     self.parser.mode = ParsingMode::Block;
                     self.parser.lexer.enter_body()?;
                 }
             }
             Some(Block) => {
-                log::debug!("deserialize_seq: Block");
                 self.parser.mode = ParsingMode::Block;
                 self.parser.lexer.enter_body()?;
             }
             Some(BodyLine(_)) => {
-                log::debug!("deserialize_seq: Inline");
                 self.parser.mode = ParsingMode::Word;
             }
         }
@@ -220,29 +209,22 @@ impl<'a, 'de> de::Deserializer<'de> for &'a mut Deserializer<'de> {
     {
         use Shape::*;
         self.parser.verify_seq_startable()?;
-        log::debug!("deserialize_tuple: {:?}", self.parser.lexer);
 
         match self.parser.lexer.classify() {
             None => return err!("deserialize_tuple: EOF"),
             Some(Section(headline)) => {
                 if !headline.starts_with("--") {
-                    log::debug!("deserialize_tuple: Section");
                     self.parser.mode = ParsingMode::Headline;
                 } else {
-                    log::debug!(
-                        "deserialize_tuple: Block with comment headline"
-                    );
                     self.parser.mode = ParsingMode::Block;
                     self.parser.lexer.enter_body()?;
                 }
             }
             Some(Block) => {
-                log::debug!("deserialize_tuple: Block");
                 self.parser.mode = ParsingMode::Block;
                 self.parser.lexer.enter_body()?;
             }
             Some(BodyLine(_)) => {
-                log::debug!("deserialize_tuple: Inline");
                 self.parser.mode = ParsingMode::Word;
             }
         }
@@ -266,7 +248,6 @@ impl<'a, 'de> de::Deserializer<'de> for &'a mut Deserializer<'de> {
         V: de::Visitor<'de>,
     {
         self.parser.verify_seq_startable()?;
-        log::debug!("deserialize_map: {:?}", self.parser.lexer);
 
         self.parser.lexer.enter_body()?;
         visitor.visit_map(Sequence::new(self))
@@ -282,7 +263,6 @@ impl<'a, 'de> de::Deserializer<'de> for &'a mut Deserializer<'de> {
         V: de::Visitor<'de>,
     {
         self.parser.verify_seq_startable()?;
-        log::debug!("deserialize_struct: {:?}", self.parser.lexer);
 
         self.parser.lexer.enter_body()?;
         visitor.visit_map(Sequence::new(self).as_struct(fields))
@@ -364,7 +344,6 @@ impl<'a, 'de> Sequence<'a, 'de> {
     }
 
     fn exit(&mut self) -> Result<()> {
-        log::debug!("exit: {:?}", self.de.parser.lexer);
         if self.de.parser.mode.is_inline() {
             self.de.parser.lexer.exit_words()?;
         } else if !self.is_merged {
@@ -383,7 +362,6 @@ impl<'a, 'de> de::SeqAccess<'de> for Sequence<'a, 'de> {
     where
         T: de::DeserializeSeed<'de>,
     {
-        log::debug!("next_element_seed: Start element {}", self.idx);
         // Set marker for first or last position of tuple, special parsing
         // rules are in effect in these.
         if self.tuple_length.is_some() && self.idx == 0 {
@@ -414,7 +392,6 @@ impl<'a, 'de> de::SeqAccess<'de> for Sequence<'a, 'de> {
         }
 
         if self.tuple_length.is_none() && !self.de.parser.has_next_token() {
-            log::debug!("next_element_seed: Out of sequence elements");
             self.exit()?;
             return Ok(None);
         }
@@ -422,11 +399,6 @@ impl<'a, 'de> de::SeqAccess<'de> for Sequence<'a, 'de> {
         self.de.checkpoint.save(old_parser, self.de.parser.input());
 
         let ret = seed.deserialize(&mut *self.de).map(Some);
-        log::debug!(
-            "next_element_seed: Deserialized element {}{}",
-            self.idx,
-            if ret.is_err() { " (FAILED)" } else { "" }
-        );
         self.idx += 1;
 
         if let Some(len) = self.tuple_length {
@@ -449,11 +421,7 @@ impl<'a, 'de> de::MapAccess<'de> for Sequence<'a, 'de> {
     where
         K: de::DeserializeSeed<'de>,
     {
-        log::debug!("next_key_seed start");
         if self.contents_mode {
-            log::debug!(
-                "next_key_seed: Already entered contents mode, no more keys"
-            );
             // Do not call exit in contents mode.
             // Similar to merged mode. Deserializing contents object should
             // have handled the stack.
@@ -469,7 +437,6 @@ impl<'a, 'de> de::MapAccess<'de> for Sequence<'a, 'de> {
         //     x: 1 2
         let is_outline_value = match self.de.parser.lexer.classify() {
             None => {
-                log::debug!("next_key_seed: Out of input, exiting");
                 self.exit()?;
                 return Ok(None);
             }
@@ -477,17 +444,14 @@ impl<'a, 'de> de::MapAccess<'de> for Sequence<'a, 'de> {
                 return err!("next_key_seed: Invalid shape");
             }
             Some(Shape::Section(_)) => {
-                log::debug!("next_key_seed: Section key-value");
                 true
             }
             Some(Shape::BodyLine(_)) => {
-                log::debug!("next_key_seed: Inline key-value");
                 false
             }
         };
 
         if self.is_struct {
-            log::debug!("next_key_seed: (struct) {:?}", self.de.parser.lexer);
             self.de.parser.mode = ParsingMode::Key;
 
             if self.de.parser.clone().next_token().is_err() {
@@ -500,10 +464,6 @@ impl<'a, 'de> de::MapAccess<'de> for Sequence<'a, 'de> {
                 {
                     return err!("next_key_seed: No _contents field to catch additional contents");
                 }
-
-                log::debug!(
-                    "next_key_seed: Out of keys, entering contents mode"
-                );
 
                 // There's still content, but no valid key. Do the magic bit
                 // and conjure up a '_contents' key for the remaining content.
@@ -523,8 +483,6 @@ impl<'a, 'de> de::MapAccess<'de> for Sequence<'a, 'de> {
                 }
             }
         } else {
-            log::debug!("next_key_seed: (map) {:?}", self.de.parser.lexer);
-
             // Keys are read as regular values for a map
             if is_outline_value {
                 // Lines for outline content
@@ -553,7 +511,6 @@ impl<'a, 'de> de::MapAccess<'de> for Sequence<'a, 'de> {
         if self.de.parser.mode == ParsingMode::Word {
             self.de.parser.mode = ParsingMode::Line;
         }
-        log::debug!("next_value_seed: {:?}", self.de.parser.lexer);
         seed.deserialize(&mut *self.de)
     }
 }
@@ -590,21 +547,17 @@ impl<'a> Checkpoint<'a> {
         if seen_position {
             // We already stored a jump to this position, do not munge
             // checkpoint with a no-length jump
-            log::debug!("Checkpoint::save: At known position, doing nothing");
         } else if did_skip {
-            log::debug!("Checkpoint::save: Saving state");
             self.span = Some((old_state, new_pos));
         } else {
             // Entered a new position, but there's no skip to back over,
             // turn checkpoint into no-op.
-            log::debug!("Checkpoint::save: No skip, clearing checkpoint");
             self.span = None;
         }
     }
 
     pub fn restore(&mut self, state: &mut Parser<'a>) {
         if let Some((old_state, _)) = std::mem::replace(&mut self.span, None) {
-            log::debug!("Checkpoint::restore: Restoring earlier state");
             *state = old_state;
         }
     }
