@@ -167,6 +167,33 @@ fn ser_sequence_with_separators() {
 }
 
 #[test]
+fn ser_section_atoms() {
+    // Atoms can be section-like.
+    test_inexact(
+        "
+’Twas brillig, and the slithy toves
+      Did gyre and gimble in the wabe:
+All mimsy were the borogoves,
+      And the mome raths outgrabe.
+
+“Beware the Jabberwock, my son!
+      The jaws that bite, the claws that catch!
+Beware the Jubjub bird, and shun
+      The frumious Bandersnatch!”",
+        &vec![
+            s("’Twas brillig, and the slithy toves
+      Did gyre and gimble in the wabe:"),
+            s("All mimsy were the borogoves,
+      And the mome raths outgrabe."),
+            s("“Beware the Jabberwock, my son!
+      The jaws that bite, the claws that catch!"),
+            s("Beware the Jubjub bird, and shun
+      The frumious Bandersnatch!”"),
+        ],
+    );
+}
+
+#[test]
 fn ser_section_tuple() {
     test_inexact(
         "\
