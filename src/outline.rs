@@ -1,34 +1,95 @@
-use serde_derive::{Deserialize, Serialize};
-use std::fmt;
+use serde::{Deserialize, Serialize};
+use serde_bytes::{ByteBuf, Bytes};
+use std::{fmt, ops::Deref, ops::DerefMut};
 
-pub type Section<T> = (T, Outline<T>);
+/// Wrapper type for section headlines that will force an IDM structure
+/// including it to be parsed in raw mode.
+#[derive(Clone, Default, PartialEq, Eq, Hash)]
+pub struct Raw<T>(pub T);
 
-/// Canonical Outline datatype.
-#[derive(Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Outline<T>(pub Vec<Section<T>>);
+impl<T: AsRef<[u8]>> serde::Serialize for Raw<T> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        // Convert headline to bytes to trigger special outline
+        // serialization.
+        Bytes::new(self.0.as_ref()).serialize(serializer)
+    }
+}
 
-impl<T> std::ops::Deref for Outline<T> {
-    type Target = Vec<Section<T>>;
+impl<'de> serde::Deserialize<'de> for Raw<String> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        // Deserialize byte buffer to trigger outline mode, convert to String.
+        let ret: ByteBuf = serde::Deserialize::deserialize(deserializer)?;
+        let ret = String::from_utf8(ret.into_vec())
+            .map_err(serde::de::Error::custom)?;
+        Ok(Raw(ret))
+    }
+}
+
+impl<T> Deref for Raw<T> {
+    type Target = T;
 
     fn deref(&self) -> &Self::Target {
         &self.0
     }
 }
 
-impl<T> std::iter::FromIterator<(T, Outline<T>)> for Outline<T> {
-    fn from_iter<U: IntoIterator<Item = Section<T>>>(iter: U) -> Self {
-        Outline(iter.into_iter().collect())
+impl<T> DerefMut for Raw<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
     }
 }
 
-impl<T: fmt::Debug> fmt::Debug for Outline<T> {
+impl<T: fmt::Debug> fmt::Debug for Raw<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fn print<T: fmt::Debug>(
+        T::fmt(self, f)
+    }
+}
+
+impl<T: fmt::Display> fmt::Display for Raw<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        T::fmt(self, f)
+    }
+}
+
+#[derive(Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct Section(pub Raw<String>, pub Outline);
+
+/// Canonical Outline datatype.
+#[derive(Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct Outline(pub Vec<Section>);
+
+impl Deref for Outline {
+    type Target = Vec<Section>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl std::iter::FromIterator<(String, Outline)> for Outline {
+    fn from_iter<U: IntoIterator<Item = (String, Outline)>>(iter: U) -> Self {
+        Outline(
+            iter.into_iter()
+                .map(|(head, body)| Section(Raw(head), body))
+                .collect(),
+        )
+    }
+}
+
+impl fmt::Debug for Outline {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fn print(
             f: &mut fmt::Formatter,
             depth: usize,
-            otl: &Outline<T>,
+            otl: &Outline,
         ) -> fmt::Result {
-            for (title, body) in &otl.0 {
+            for Section(title, body) in &otl.0 {
                 for _ in 0..depth {
                     write!(f, "  ")?;
                 }
@@ -50,13 +111,10 @@ impl<T: fmt::Debug> fmt::Debug for Outline<T> {
 #[macro_export(local_inner_macros)]
 macro_rules! outline_elt {
     ([$arg:expr, $($child:tt),+]) => {
-        (Some($arg.into()), outline![$($child),+])
-    };
-    ([, $($child:tt),+]) => {
-        (None, outline![$($child),+])
+        ($arg.into(), outline![$($child),+])
     };
     ($arg:expr) => {
-        (Some($arg.into()), $crate::outline::Outline::default())
+        ($arg.into(), $crate::outline::Outline::default())
     };
 }
 
@@ -66,7 +124,7 @@ macro_rules! outline {
     [$($arg:tt),*] => {
         {
             use std::iter::FromIterator;
-            let ret: $crate::outline::Outline<Option<String>> =
+            let ret: $crate::outline::Outline =
                 $crate::outline::Outline::from_iter(vec![
                     $($crate::outline_elt!($arg)),*
                 ].into_iter());

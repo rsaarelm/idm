@@ -1,281 +1,407 @@
-use crate::{from_str, outline, to_string};
+use crate::{
+    from_str, outline,
+    outline::{Outline, Raw},
+    to_string, to_string_styled_like,
+};
 use pretty_assertions::assert_eq;
-use serde_derive::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt;
 use std::iter::FromIterator;
 
-type Outline = outline::Outline<Option<String>>;
+macro_rules! test {
+    ($val:expr, $canon:expr) => {
+        test($canon, $val);
+    };
 
-#[test]
-fn test_atom() {
-    test("123", &123u32);
-    test("2.718", &2.718f32);
-    test("xyzzy", &s("xyzzy"));
-    test("one two", &s("one two"));
-    test("one\ntwo", &s("one\ntwo"));
-    test("one two\nthree", &s("one two\nthree"));
+    ($val:expr, $canon:expr, $($alt:expr),*) => {
+        test($canon, $val);
+        $(test_inexact($alt, $val);)*
+    };
 }
 
 #[test]
-fn test_simple_sequence() {
-    test::<Vec<i32>>("", &vec![]);
-
-    test("foo\nbar\nbaz", &vec![s("foo"), s("bar"), s("baz")]);
-    test("1\n2\n3", &vec![1, 2, 3]);
-    test("1\n2\n3", &(1, 2, 3));
+fn atom() {
+    test!(&123u32, "123");
+    test!(&2.718f32, "2.718");
+    test!(&s("xyzzy"), "xyzzy");
+    test!(&s("one two"), "one two");
+    test!(&s("one\ntwo"), "one\ntwo");
+    test!(&s("one two\nthree"), "one two\nthree");
 }
 
 #[test]
-fn test_nested_sequence() {
+fn simple_sequence() {
+    test!(&vec![s("foo"), s("bar"), s("baz")], "foo\nbar\nbaz");
+    test!(&vec![1, 2, 3], "1\n2\n3");
+    test!(&(1, 2, 3), "1\n2\n3");
+
+    test!(&vec![(Some(s("A")), 2)], "A 2");
+
+    // Raw forces section when you could be inlined otherwise.
+    test!(
+        &vec![(Raw(s("A")), 2)],
+        "\
+A
+  2"
+    );
+}
+
+#[test]
+fn block_sequence() {
+    test!(
+        &vec![s("foo\nbar"), s("baz")],
+        "\
+--
+  foo
+  bar
+baz",
+        "\
+--
+  foo
+  bar
+--
+  baz"
+    );
+
+    test(
+        "\
+--
+  foo
+  bar
+baz",
+        &vec![s("foo\nbar"), s("baz")],
+    );
+
+    test!(
+        &vec![s("baz"), s("foo\nbar")],
+        "\
+baz
+--
+  foo
+  bar"
+    );
+}
+
+#[test]
+fn block_sequence_comment_escape() {
+    test!(
+        &vec![s("foo"), s("-- baz")],
+        "\
+foo
+--
+  -- baz"
+    );
+}
+
+#[test]
+fn nested_sequence() {
     // All tests are repeated for seq-like Vec types and tuple-like array
     // types because those types have different code paths in the serializer.
 
     // Inline inner form matrix
 
     // Vec case (seq)
-    test(
+    test!(
+        &vec![vec![1, 2], vec![3, 4]],
         "\
 1 2
 3 4",
-        &vec![vec![1, 2], vec![3, 4]],
+        "\
+1 2
+
+3 4",
+        "\
+--
+\t1
+\t2
+--
+\t3
+\t4",
+        "\
+--
+  1
+  2
+-- Here is a multiline comment
+-- Multiple comment lines with no content in between
+--
+-- Even if they're empty
+-- Don't mean an empty sequence exists in between them
+--
+  3
+  4"
     );
+
+    // NB. Tuples are pretty happy to opportunistically switch to section
+    // mode, so they're not viable for the rows level.
 
     // Array case (tuple)
-    test(
+    test!(
+        &vec![[1, 2], [3, 4]],
         "\
 1 2
 3 4",
-        &[[1, 2], [3, 4]],
-    );
-
-    // Outline inner form
-    // Not the default serialization form, so we specify an inexact test.
-
-    test_inexact(
         "\
+1 2
+
+3 4",
+        "\
+--
 \t1
 \t2
-,
+--
 \t3
 \t4",
-        &vec![vec![1, 2], vec![3, 4]],
-    );
-
-    test_inexact(
         "\
-\t1
-\t2
-,
-\t3
-\t4",
-        &[[1, 2], [3, 4]],
+--
+  1
+  2
+-- Here is a multiline comment
+-- Multiple comment lines with no content in between
+--
+-- Even if they're empty
+-- Don't mean an empty sequence exists in between them
+--
+  3
+  4"
     );
+}
 
+#[test]
+fn multi_nesting() {
     // Outline list of matrices.
-    test(
-        "\
-\t1 2
-\t3 4
-,
-\t5 6
-\t7 8",
+    test!(
         &vec![vec![vec![1, 2], vec![3, 4]], vec![vec![5, 6], vec![7, 8]]],
+        "\
+--
+  1 2
+  3 4
+--
+  5 6
+  7 8"
     );
 
-    test(
+    test!(
+        &vec![vec![[1, 2], [3, 4]], vec![[5, 6], [7, 8]]],
         "\
-\t1 2
-\t3 4
-,
-\t5 6
-\t7 8",
-        &[[[1, 2], [3, 4]], [[5, 6], [7, 8]]],
+--
+  1 2
+  3 4
+--
+  5 6
+  7 8"
     );
 }
 
 #[test]
-fn test_section_tuple() {
-    test_inexact(
+fn section_atoms() {
+    // Atoms can be section-like.
+    test!(
+        &vec![
+            s("’Twas brillig, and the slithy toves
+      Did gyre and gimble in the wabe:"),
+            s("All mimsy were the borogoves,
+      And the mome raths outgrabe."),
+            s("“Beware the Jabberwock, my son!
+      The jaws that bite, the claws that catch!"),
+            s("Beware the Jubjub bird, and shun
+      The frumious Bandersnatch!”")
+        ],
         "\
-1
-\t2",
+’Twas brillig, and the slithy toves
+      Did gyre and gimble in the wabe:
+All mimsy were the borogoves,
+      And the mome raths outgrabe.
+“Beware the Jabberwock, my son!
+      The jaws that bite, the claws that catch!
+Beware the Jubjub bird, and shun
+      The frumious Bandersnatch!”",
+        "\
+’Twas brillig, and the slithy toves
+      Did gyre and gimble in the wabe:
+All mimsy were the borogoves,
+      And the mome raths outgrabe.
+
+“Beware the Jabberwock, my son!
+      The jaws that bite, the claws that catch!
+Beware the Jubjub bird, and shun
+      The frumious Bandersnatch!”"
+    );
+}
+
+#[test]
+fn section_tuple() {
+    test!(
         &vec![(1, 2)],
-    );
-
-    test_inexact(
+        "1 2",
         "\
 1
-\t2
-\t3",
-        &vec![(1, 2, 3)],
+  2"
     );
 
-    test_inexact(
-        "\
-1
-\t2
-3
-\t4",
+    test!(
         &vec![(1, 2), (3, 4)],
-    );
-}
-
-#[test]
-fn test_tuple_tail_sequence_continuation() {
-    test::<(i32, i32, Vec<i32>)>(
+        "\
+1 2
+3 4",
         "\
 1
-2
+\t2
 3
-4",
-        &(1, 2, vec![3, 4]),
+\t4"
+    );
+
+    test!(
+        &vec![(
+            "Lorem".to_string(),
+            "ipsum dolor sit amet\nconsectetur adipiscing elit".to_string(),
+        )],
+        "\
+Lorem
+  ipsum dolor sit amet
+  consectetur adipiscing elit"
     );
 }
 
 #[test]
-fn test_option_tuple() {
-    test::<Vec<(Option<i32>, i32)>>(
-        "\
-1
-\t2",
-        &vec![(Some(1), 2)],
+fn tuple_tail_line_mode() {
+    // Can still inline things if the last tuple item isn't a word token.
+
+    test!(&vec![(s("Foo"), s("Bar Baz Quux"))], "Foo Bar Baz Quux");
+
+    test!(
+        &vec![(s("Foo"), s("Bar"), s("Baz Quux"))],
+        "Foo Bar Baz Quux"
     );
 
-    test_inexact::<Vec<(Option<i32>, i32)>>(
+    // Now it's not the last item that's line-like, have to go block mode.
+    test!(
+        &vec![(s("Foo"), s("Bar Baz"), s("Quux"))],
         "\
-,
-\t2",
-        &vec![(None, 2)],
-    );
-
-    test::<Vec<(Option<i32>, i32)>>(
-        "\
-
-\t2",
-        &vec![(None, 2)],
+--
+  Foo
+  Bar Baz
+  Quux"
     );
 }
 
 #[test]
-fn test_canonical_outline() {
-    test("", &Outline::default());
+fn basic_outlines() {
+    test!(&Outline::default(), "");
 
-    test("Xyzzy", &outline!["Xyzzy"]);
+    test!(&outline!["Xyzzy"], "Xyzzy");
 
-    test("A\n\nB", &outline![["A", ""], "B"]);
+    test!(&outline!["A", "B"], "A\nB");
+    test!(&outline!["A", "B", "C"], "A\nB\nC");
+    test!(&outline![["A", "B"]], "A\n  B");
+    test!(&outline![["A", "B"], "C"], "A\n  B\nC");
 
-    test("A\n\tB\n\n\tC", &outline![["A", ["B", ""], "C"]]);
-
-    test("A\n  B", &outline!["A", "  B"]);
-
-    test(
-        "\
-Xyzzy
-\tPlugh",
-        &outline![["Xyzzy", "Plugh"]],
-    );
-
-    test(
-        "\
-Xyzzy
-Plugh",
-        &outline!["Xyzzy", "Plugh"],
-    );
-
-    test(
-        "\
-\tPlugh",
-        &outline![[, "Plugh"]],
-    );
-
-    test_inexact(
-        "\
-,
-\tPlugh",
-        &outline![[, "Plugh"]],
-    );
-
-    test(
-        "\
-Xyzzy
-\tPlugh
-Qux
-\tQuux",
+    test!(
         &outline![["Xyzzy", "Plugh"], ["Qux", "Quux"]],
-    );
-
-    test(
         "\
 Xyzzy
-\tPlugh
-\tBlorb
+  Plugh
 Qux
-\tQuux",
-        &outline![["Xyzzy", "Plugh", "Blorb"], ["Qux", "Quux"]],
+  Quux"
     );
 
-    test(
+    test!(
+        &outline![["Xyzzy", "Plugh", "Blorb"], ["Qux", "Quux"]],
         "\
 Xyzzy
-\tPlugh
-,
-\tQuux",
-        &outline![["Xyzzy", "Plugh"], [, "Quux"]],
-    );
-
-    test(
-        "\
-A
-,
-\tC",
-        &outline!["A", [, "C"]],
+  Plugh
+  Blorb
+Qux
+  Quux"
     );
 }
 
 #[test]
-fn test_comma_escape() {
+fn outline_with_blanks() {
+    test!(
+        &outline!["A", ["--", "C"]],
+        "\
+A
+--
+\tC"
+    );
+
+    test!(
+        &outline!["A", "", "B"],
+        "\
+A
+
+B"
+    );
+    test!(
+        &outline![["A", "B", "", "C"]],
+        "\
+A
+  B
+
+  C"
+    );
+}
+
+#[test]
+fn escape_comment() {
     // Standalone string (not sequence), no escaping
-    test(",", &s(","));
+    test!(&s("--"), "--");
 
-    // Line mode, must escape comma
-    test_inexact::<Vec<String>>(
+    // Use separator to make the comment paragraph-like in an outline list
+    test!(
+        &vec![s("--"), s("foo")],
         "\
-,,
-foo",
-        &vec![s(","), s("foo")],
-    );
-
-    // Paragraph mode, comma as is
-    test_inexact::<Vec<String>>(
-        "\
-\t,
-,
-\tfoo",
-        &vec![s(","), s("foo")],
-    );
-
-    test(
-        "\
-A
-,,
-B",
-        &outline!["A", ",", "B"],
+--
+  --
+foo"
     );
 }
 
 #[test]
-fn test_struct() {
+fn map() {
+    test!(
+        &BTreeMap::from_iter(vec![
+            ("bar".to_string(), 1),
+            ("foo".to_string(), 2),
+        ]),
+        "\
+bar 1
+foo 2",
+        "\
+bar
+  1
+foo
+  2"
+    );
+
+    test!(
+        &BTreeMap::from_iter(vec![
+            ("bar".to_string(), vec![1, 2, 3]),
+            ("foo".to_string(), vec![2, 3, 4]),
+        ]),
+        "\
+bar 1 2 3
+foo 2 3 4",
+        "\
+bar
+  1
+  2
+  3
+foo
+  2
+  3
+  4"
+    );
+}
+
+#[test]
+fn simple_struct() {
     #[derive(Clone, Eq, PartialEq, Default, Debug, Serialize, Deserialize)]
     struct Simple {
         name_text: String,
         x: i32,
         y: i32,
-    }
-
-    #[derive(Clone, Eq, PartialEq, Default, Debug, Serialize, Deserialize)]
-    struct Vectored {
-        v: Vec<i32>,
     }
 
     test(
@@ -288,21 +414,6 @@ y: 2",
             x: 1,
             y: 2,
         },
-    );
-
-    test(
-        "\
-v: 1 2 3",
-        &Vectored { v: vec![1, 2, 3] },
-    );
-
-    test_inexact(
-        "\
-v:
-\t1
-\t2
-\t3",
-        &Vectored { v: vec![1, 2, 3] },
     );
 
     // Must fail if there's no _contents field to grab contents
@@ -324,35 +435,99 @@ y: 2
 unexpected: stuff"
     )
     .is_err());
-
-    /*
-        XXX: Does not currently work, see https://github.com/serde-rs/serde/issues/1346
-        FIXME if the Serde issue gets resolved.
-
-        #[derive(Clone, Eq, PartialEq, Default, Debug, Serialize, Deserialize)]
-        struct Nested {
-            #[serde(flatten)]
-            simple: Simple,
-        }
-
-        test(
-            "\
-    name-text: Foo bar
-    x: 1
-    y: 2",
-            &Nested {
-                simple: Simple {
-                    name_text: s("Foo bar"),
-                    x: 1,
-                    y: 2,
-                },
-            },
-        );
-        */
 }
 
 #[test]
-fn test_struct_contents() {
+fn map_structs() {
+    #[derive(Clone, Eq, PartialEq, Default, Debug, Serialize, Deserialize)]
+    struct Simple {
+        x: i32,
+        y: i32,
+    }
+
+    test(
+        "\
+one
+  x: 3
+  y: 4
+two
+  x: 5
+  y: 6",
+        &BTreeMap::from_iter(vec![
+            ("one".to_string(), Simple { x: 3, y: 4 }),
+            ("two".to_string(), Simple { x: 5, y: 6 }),
+        ]),
+    );
+}
+
+#[test]
+fn vector_struct() {
+    #[derive(Clone, Eq, PartialEq, Default, Debug, Serialize, Deserialize)]
+    struct Vectored {
+        v: Vec<i32>,
+    }
+
+    test(
+        "\
+v: 1 2 3",
+        &Vectored { v: vec![1, 2, 3] },
+    );
+
+    test_inexact(
+        "\
+v:
+\t1
+\t2
+\t3",
+        &Vectored { v: vec![1, 2, 3] },
+    );
+
+    #[derive(Clone, Eq, PartialEq, Default, Debug, Serialize, Deserialize)]
+    struct VectoredString {
+        v: Vec<String>,
+    }
+    test_inexact(
+        "\
+v:
+  a
+  b
+  c",
+        &VectoredString {
+            v: vec![s("a"), s("b"), s("c")],
+        },
+    );
+}
+
+#[test]
+fn struct_flatten() {
+    /*
+         XXX: Does not currently work, see https://github.com/serde-rs/serde/issues/1346
+         FIXME if the Serde issue gets resolved.
+
+         #[derive(Clone, Eq, PartialEq, Default, Debug, Serialize, Deserialize)]
+         struct Nested {
+             #[serde(flatten)]
+             simple: Simple,
+         }
+
+         test(
+             "\
+     name-text: Foo bar
+     x: 1
+     y: 2",
+             &Nested {
+                 simple: Simple {
+                     name_text: s("Foo bar"),
+                     x: 1,
+                     y: 2,
+                 },
+             },
+         );
+    */
+}
+
+#[test]
+fn struct_contents() {
     #[derive(Clone, Eq, PartialEq, Default, Debug, Serialize, Deserialize)]
     struct Contentful {
         x: i32,
@@ -404,7 +579,7 @@ B",
         "\
 a: 1
 x
-\ta: 2",
+  a: 2",
         &Recursive {
             a: 1,
             _contents: BTreeMap::from_iter(vec![(
@@ -420,7 +595,7 @@ x
     test(
         "\
 item
-\ta: 1",
+  a: 1",
         &Recursive {
             a: 0,
             _contents: BTreeMap::from_iter(vec![(
@@ -436,8 +611,8 @@ item
     test(
         "\
 items
-\titem
-\t\ta: 1",
+  item
+    a: 1",
         &Recursive {
             a: 0,
             _contents: BTreeMap::from_iter(vec![(
@@ -458,32 +633,49 @@ items
 }
 
 #[test]
-fn test_nesting_contents() {
+fn oneshot_section() {
+    #[derive(Clone, Eq, PartialEq, Default, Debug, Serialize, Deserialize)]
+    struct Data {
+        x: i32,
+        y: i32,
+    }
+
+    test(
+        "\
+Headline
+  x: 1
+  y: 2",
+        &vec![("Headline".to_string(), Data { x: 1, y: 2 })],
+    );
+}
+
+#[test]
+fn nesting_contents() {
     const STARMAP: &str = "\
 Sol
-\tage: 4.6e9
-\tmass: 1.0
-\tMercury
-\t\torbit: 0.39
-\t\tmass: 0.055
-\tVenus
-\t\torbit: 0.72
-\t\tmass: 0.815
-\tEarth
-\t\torbit: 1.0
-\t\tmass: 1.0
-\tMars
-\t\torbit: 1.52
-\t\tmass: 0.1
+  age: 4.6e9
+  mass: 1.0
+  Mercury
+    orbit: 0.39
+    mass: 0.055
+  Venus
+    orbit: 0.72
+    mass: 0.815
+  Earth
+    orbit: 1.0
+    mass: 1.0
+  Mars
+    orbit: 1.52
+    mass: 0.1
 Alpha Centauri
-\tage: 5.3e9
-\tmass: 1.1
-\tEurytion
-\t\torbit: 0.47
-\t\tmass: 0.08
-\tChiron
-\t\torbit: 1.32
-\t\tmass: 1.33";
+  age: 5.3e9
+  mass: 1.1
+  Eurytion
+    orbit: 0.47
+    mass: 0.08
+  Chiron
+    orbit: 1.32
+    mass: 1.33";
 
     #[derive(Clone, PartialEq, Default, Debug, Serialize, Deserialize)]
     struct Star {
@@ -535,8 +727,12 @@ Alpha Centauri
     test_inexact(STARMAP, &starmap);
 }
 
+/*
+
+// Disabled, currently inlining opportunistically at any length.
+
 #[test]
-fn test_value_length() {
+fn value_length() {
     #[derive(PartialEq, Default, Debug, Serialize, Deserialize)]
     struct Entry {
         x: String,
@@ -595,17 +791,18 @@ y: s("a"),
         },
     );
 }
+*/
 
 #[test]
-fn test_comma_value() {
+fn comment_value() {
     #[derive(Eq, PartialEq, Debug, Serialize, Deserialize)]
     pub struct Ch {
-        c: char,
+        c: String,
     }
     test(
         "\
-c: ,",
-        &Ch { c: ',' },
+c: --",
+        &Ch { c: "--".into() },
     );
 }
 
@@ -620,8 +817,27 @@ where
     let deser = from_str::<T>(idm).expect("IDM did not deserialize to type");
     assert_eq!(&deser, val);
 
+    // Use to_string_styled_like to pick the indent style from the input's
+    // example, serialize tabs when parsing tabs, spaces when parsing spaces.
+    let reser = to_string_styled_like(idm, val)
+        .expect("Value did not serialize to IDM");
+
+    let reser = reser.trim_end();
+
+    if idm != reser {
+        println!("Deserialized \n\x1b[1;32m{}\x1b[0m", idm);
+        println!("Reserialized \n\x1b[1;31m{}\x1b[0m", reser);
+    }
+
+    assert_eq!(idm, reser);
+
+    // Also check for default style ser, two characters per indent can trip
+    // some deserialization bugs that generate 1-character dummy indents where
+    // they shouldn't.
     let reser = to_string(val).expect("Value did not serialize to IDM");
-    assert_eq!(idm, reser.trim_end());
+    let new_deser = from_str::<T>(&reser)
+        .expect("Serialized IDM did not deserialize to type");
+    assert_eq!(&new_deser, val);
 }
 
 /// Test that deserialization matches value and value's serialization
