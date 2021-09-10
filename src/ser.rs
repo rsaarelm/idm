@@ -198,10 +198,7 @@ impl Expr {
     }
 
     fn is_inline_token(&self) -> bool {
-        match self {
-            Atom(Word(_)) => true,
-            _ => false,
-        }
+        matches!(self, Atom(Word(_)))
     }
 
     /// Expression looks like a comment line and needs to be escaped in a
@@ -241,10 +238,8 @@ impl Expr {
                         if !e.can_be_tail_lined() {
                             return false;
                         }
-                    } else {
-                        if !e.is_inline_token() {
-                            return false;
-                        }
+                    } else if !e.is_inline_token() {
+                        return false;
                     }
                 }
                 true
@@ -861,7 +856,7 @@ impl<'a> ser::SerializeStruct for MapSerializer {
             if key == "_contents" {
                 // Magic contents key!
                 self.contents = value;
-            } else if key.starts_with("_") {
+            } else if key.starts_with('_') {
                 // Refuse to emit keys that might look like comments when
                 // converted to kebab-case.
                 //

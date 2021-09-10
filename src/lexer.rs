@@ -670,7 +670,7 @@ mod parse {
         if input == "" {
             err!("parse::line at EOF")
         } else {
-            let p = input.find('\n').unwrap_or(input.len());
+            let p = input.find('\n').unwrap_or_else(|| input.len());
             Ok((&input[..p], &input[(p + 1).min(input.len())..]))
         }
     }

@@ -36,10 +36,7 @@ pub enum ParsingMode {
 impl ParsingMode {
     pub fn is_inline(self) -> bool {
         use ParsingMode::*;
-        match self {
-            Word | Key | DummyKey => true,
-            _ => false,
-        }
+        matches!(self, Word | Key | DummyKey)
     }
 }
 
