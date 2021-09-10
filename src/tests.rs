@@ -11,12 +11,16 @@ use std::iter::FromIterator;
 
 macro_rules! test {
     ($val:expr, $canon:expr) => {
-        test($canon, $val);
+        test($val, $canon);
     };
 
     ($val:expr, $canon:expr, $($alt:expr),*) => {
-        test($canon, $val);
-        $(test_inexact($alt, $val);)*
+        test($val, $canon);
+        $(test_inexact($val, $alt);)*
+    };
+
+    ($val:expr, _, $($alt:expr),*) => {
+        $(test_inexact($val, $alt);)*
     };
 }
 
@@ -64,13 +68,13 @@ baz",
   baz"
     );
 
-    test(
+    test!(
+        &vec![s("foo\nbar"), s("baz")],
         "\
 --
   foo
   bar
 baz",
-        &vec![s("foo\nbar"), s("baz")],
     );
 
     test!(
@@ -404,16 +408,16 @@ fn simple_struct() {
         y: i32,
     }
 
-    test(
-        "\
-name-text: Foo bar
-x: 1
-y: 2",
+    test!(
         &Simple {
             name_text: s("Foo bar"),
             x: 1,
             y: 2,
         },
+        "\
+name-text: Foo bar
+x: 1
+y: 2",
     );
 
     // Must fail if there's no _contents field to grab contents
@@ -445,7 +449,11 @@ fn map_structs() {
         y: i32,
     }
 
-    test(
+    test!(
+        &BTreeMap::from_iter(vec![
+            ("one".to_string(), Simple { x: 3, y: 4 }),
+            ("two".to_string(), Simple { x: 5, y: 6 }),
+        ]),
         "\
 one
   x: 3
@@ -453,10 +461,6 @@ one
 two
   x: 5
   y: 6",
-        &BTreeMap::from_iter(vec![
-            ("one".to_string(), Simple { x: 3, y: 4 }),
-            ("two".to_string(), Simple { x: 5, y: 6 }),
-        ]),
     );
 }
 
@@ -467,34 +471,31 @@ fn vector_struct() {
         v: Vec<i32>,
     }
 
-    test(
-        "\
-v: 1 2 3",
+    test!(
         &Vectored { v: vec![1, 2, 3] },
-    );
-
-    test_inexact(
+        "v: 1 2 3",
         "\
 v:
-\t1
-\t2
-\t3",
-        &Vectored { v: vec![1, 2, 3] },
+  1
+  2
+  3"
     );
 
     #[derive(Clone, Eq, PartialEq, Default, Debug, Serialize, Deserialize)]
     struct VectoredString {
         v: Vec<String>,
     }
-    test_inexact(
+
+    test!(
+        &VectoredString {
+            v: vec![s("a"), s("b"), s("c")],
+        },
+        "v: a b c",
         "\
 v:
   a
   b
-  c",
-        &VectoredString {
-            v: vec![s("a"), s("b"), s("c")],
-        },
+  c"
     );
 }
 
@@ -535,17 +536,17 @@ fn struct_contents() {
         _contents: Outline,
     }
 
-    test(
-        "\
-x: 1
-y: 2
-A
-\tB",
+    test!(
         &Contentful {
             x: 1,
             y: 2,
             _contents: outline![["A", "B"]],
         },
+        "\
+x: 1
+y: 2
+A
+\tB",
     );
 
     #[derive(Clone, Eq, PartialEq, Default, Debug, Serialize, Deserialize)]
@@ -554,17 +555,17 @@ A
         y: i32,
         _contents: Vec<String>,
     }
-    test(
-        "\
-x: 1
-y: 2
-A
-B",
+    test!(
         &Contentful2 {
             x: 1,
             y: 2,
             _contents: vec![s("A"), s("B")],
         },
+        "\
+x: 1
+y: 2
+A
+B",
     );
 
     #[derive(Clone, Eq, PartialEq, Default, Debug, Serialize, Deserialize)]
@@ -575,11 +576,7 @@ B",
         _contents: BTreeMap<String, Recursive>,
     }
 
-    test(
-        "\
-a: 1
-x
-  a: 2",
+    test!(
         &Recursive {
             a: 1,
             _contents: BTreeMap::from_iter(vec![(
@@ -590,12 +587,13 @@ x
                 },
             )]),
         },
+        "\
+a: 1
+x
+  a: 2",
     );
 
-    test(
-        "\
-item
-  a: 1",
+    test!(
         &Recursive {
             a: 0,
             _contents: BTreeMap::from_iter(vec![(
@@ -606,13 +604,12 @@ item
                 },
             )]),
         },
+        "\
+item
+  a: 1",
     );
 
-    test(
-        "\
-items
-  item
-    a: 1",
+    test!(
         &Recursive {
             a: 0,
             _contents: BTreeMap::from_iter(vec![(
@@ -629,6 +626,10 @@ items
                 },
             )]),
         },
+        "\
+items
+  item
+    a: 1",
     );
 }
 
@@ -640,43 +641,17 @@ fn oneshot_section() {
         y: i32,
     }
 
-    test(
+    test!(
+        &vec![("Headline".to_string(), Data { x: 1, y: 2 })],
         "\
 Headline
   x: 1
   y: 2",
-        &vec![("Headline".to_string(), Data { x: 1, y: 2 })],
     );
 }
 
 #[test]
 fn nesting_contents() {
-    const STARMAP: &str = "\
-Sol
-  age: 4.6e9
-  mass: 1.0
-  Mercury
-    orbit: 0.39
-    mass: 0.055
-  Venus
-    orbit: 0.72
-    mass: 0.815
-  Earth
-    orbit: 1.0
-    mass: 1.0
-  Mars
-    orbit: 1.52
-    mass: 0.1
-Alpha Centauri
-  age: 5.3e9
-  mass: 1.1
-  Eurytion
-    orbit: 0.47
-    mass: 0.08
-  Chiron
-    orbit: 1.32
-    mass: 1.33";
-
     #[derive(Clone, PartialEq, Default, Debug, Serialize, Deserialize)]
     struct Star {
         age: f32,
@@ -724,7 +699,35 @@ Alpha Centauri
         ].into_iter(),
     );
 
-    test_inexact(STARMAP, &starmap);
+    test!(
+        &starmap,
+        _,
+        "\
+Sol
+  age: 4.6e9
+  mass: 1.0
+  Mercury
+    orbit: 0.39
+    mass: 0.055
+  Venus
+    orbit: 0.72
+    mass: 0.815
+  Earth
+    orbit: 1.0
+    mass: 1.0
+  Mars
+    orbit: 1.52
+    mass: 0.1
+Alpha Centauri
+  age: 5.3e9
+  mass: 1.1
+  Eurytion
+    orbit: 0.47
+    mass: 0.08
+  Chiron
+    orbit: 1.32
+    mass: 1.33"
+    );
 }
 
 /*
@@ -799,10 +802,10 @@ fn comment_value() {
     pub struct Ch {
         c: String,
     }
-    test(
+    test!(
+        &Ch { c: "--".into() },
         "\
 c: --",
-        &Ch { c: "--".into() },
     );
 }
 
@@ -810,7 +813,7 @@ c: --",
 // Helper functions
 
 /// Test that deserialization matches value and serialization matches IDM.
-fn test<T>(idm: &str, val: &T)
+fn test<T>(val: &T, idm: &str)
 where
     T: PartialEq + fmt::Debug + serde::Serialize + serde::de::DeserializeOwned,
 {
@@ -845,7 +848,7 @@ where
 ///
 /// Use this version for IDM that does not reserialize the exact same way it
 /// is written.
-fn test_inexact<T>(idm: &str, val: &T)
+fn test_inexact<T>(val: &T, idm: &str)
 where
     T: PartialEq + fmt::Debug + serde::Serialize + serde::de::DeserializeOwned,
 {
