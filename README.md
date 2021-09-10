@@ -292,6 +292,10 @@ be a single section with a missing headline at line -1 and depth -1.
   is used for the rows, the section format printing for tuples will kick in
   when serializing the table and you will end up with weird-looking results.
 
+* The `_contents` value for a struct can not be another struct with named
+  fields, because these cannot be syntactically distinguished from the fields
+  of the parent struct. You usually want it to be a map type.
+
 ## License
 
 IDM is dual-licensed under Apache-2.0 and MIT.
