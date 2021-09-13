@@ -4,7 +4,7 @@ use std::{fmt, ops::Deref, ops::DerefMut};
 
 /// Wrapper type for section headlines that will force an IDM structure
 /// including it to be parsed in raw mode.
-#[derive(Clone, Default, PartialEq, Eq, Hash)]
+#[derive(Clone, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Raw<T>(pub T);
 
 impl<T: AsRef<[u8]>> serde::Serialize for Raw<T> {
@@ -42,6 +42,18 @@ impl<T> Deref for Raw<T> {
 impl<T> DerefMut for Raw<T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
+    }
+}
+
+impl<T> AsRef<T> for Raw<T> {
+    fn as_ref(&self) -> &T {
+        &self.0
+    }
+}
+
+impl AsRef<str> for Raw<String> {
+    fn as_ref(&self) -> &str {
+        self.0.as_ref()
     }
 }
 
