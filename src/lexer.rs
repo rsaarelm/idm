@@ -35,8 +35,8 @@ pub struct Lexer<'a> {
     /// Inline input position when reading words.
     inline_input: Option<&'a str>,
 
-    /// The initial input, used for determining error line numbers.
-    input_start: &'a str,
+    /// Line number for current input.
+    line_num: usize,
 }
 
 /// IDM element shape.
@@ -157,7 +157,7 @@ impl<'a> Lexer<'a> {
             in_block_mode: true,
             input,
             inline_input: None,
-            input_start: input,
+            line_num: 1,
         }
     }
 
@@ -373,7 +373,7 @@ impl<'a> Lexer<'a> {
 
     /// Attach line number to error message.
     pub fn err<T>(&self, msg: impl Into<Cow<'static, str>>) -> Result<T> {
-        Err(Error::new(msg).line_num(self.line_num()))
+        Err(Error::new(msg).line_num(self.line_num))
     }
 
     pub fn input(&self) -> &'a str {
@@ -385,18 +385,7 @@ impl<'a> Lexer<'a> {
 
 impl<'a> Lexer<'a> {
     fn numerize(&self) -> impl FnOnce(Error) -> Error + '_ {
-        move |e| e.line_num(self.line_num())
-    }
-
-    /// Return the line number where the lexer is currently at.
-    pub fn line_num(&self) -> usize {
-        // XXX: Sorta expensive, current assumption is that this is only used
-        // for off-the-happy-path parse error reports. Rewrite to cache the
-        // line number if this ever becomes a bottleneck.
-        let consumed_input =
-            &self.input_start[..self.input_start.len() - self.input.len()];
-
-        1 + consumed_input.chars().filter(|&c| c == '\n').count()
+        move |e| e.line_num(self.line_num)
     }
 
     /// Read an element into an existing string buffer.
@@ -566,6 +555,11 @@ impl<'a> Lexer<'a> {
     ///
     /// The new input position is assumed to always be at the start of a line.
     fn set_input(&mut self, new_pos: &'a str) {
+        self.line_num += self.input[..self.input.len() - new_pos.len()]
+            .chars()
+            .filter(|&c| c == '\n')
+            .count();
+
         self.input = new_pos;
         self.inline_input = None;
     }
