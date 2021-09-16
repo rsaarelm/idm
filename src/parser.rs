@@ -5,7 +5,7 @@ use crate::{
 };
 use std::{borrow::Cow, str::FromStr};
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Parser<'a> {
     pub lexer: Lexer<'a>,
     pub mode: ParsingMode,
