@@ -211,7 +211,14 @@ impl<'a, 'de> de::Deserializer<'de> for &'a mut Deserializer<'de> {
         self.parser.verify_seq_startable()?;
 
         match self.parser.lexer.classify() {
-            None => return err!("deserialize_tuple: EOF"),
+            None => {
+                // XXX: We need to okay a tuple that looks empty at this point
+                // in case the values are parsed in raw mode, in which case
+                // the parser might be rewound to an earlier position. If this
+                // isn't the case, parsing will fail later at
+                // next_element_seed.
+                self.parser.mode = ParsingMode::Block;
+            }
             Some(Section(headline)) => {
                 if !headline.starts_with("--") {
                     self.parser.mode = ParsingMode::Headline;
@@ -385,11 +392,16 @@ impl<'a, 'de> de::SeqAccess<'de> for Sequence<'a, 'de> {
         // Snapshot before eating content.
         let old_parser = self.de.parser.clone();
 
+        // When true, try to parse even when there doesn't seem to be more
+        // elements, skipped content might go into a Raw value.
+        let mut content_remains = false;
+
         // Consume comments and blanks in outline mode.
         if !self.de.parser.mode.is_inline() {
             while let Some(cls) = self.de.parser.lexer.classify() {
                 if cls.is_blank() || cls.is_standalone_comment() {
                     self.de.parser.lexer.skip()?;
+                    content_remains = true;
                 } else if cls.has_comment_head() {
                     // Consume headline, pop right back.
                     self.de.parser.lexer.enter_body()?;
@@ -401,12 +413,34 @@ impl<'a, 'de> de::SeqAccess<'de> for Sequence<'a, 'de> {
             }
         }
 
-        if self.tuple_length.is_none() && !self.de.parser.has_next_token() {
+        let no_next_token = !self.de.parser.has_next_token();
+
+        if self.tuple_length.is_none() && no_next_token && !content_remains {
+            // Unambiguously out of input, exit.
             self.exit()?;
             return Ok(None);
         }
 
         self.de.checkpoint.save(old_parser, self.de.parser.input());
+
+        if self.tuple_length.is_none() && no_next_token {
+            // It looks like we're out of input, but there might be something
+            // left for raw mode. Let's check with a throwaway clone.
+            let mut cloned = self.de.clone();
+            match seed.deserialize(&mut cloned) {
+                Ok(ret) => {
+                    // Yep! Update local state.
+                    *self.de = cloned;
+                    self.idx += 1;
+                    return Ok(Some(ret));
+                }
+                Err(_) => {
+                    // Nope, really out.
+                    self.exit()?;
+                    return Ok(None);
+                }
+            }
+        }
 
         let ret = seed.deserialize(&mut *self.de).map(Some);
         self.idx += 1;

@@ -348,6 +348,27 @@ A
 }
 
 #[test]
+fn outline_tail_comments() {
+    test!(
+        &outline![["A", "B", "-- C"]],
+        "\
+A
+  B
+  -- C"
+    );
+
+    test!(
+        &outline![["A", "B", "-- C", "", "-- D"]],
+        "\
+A
+  B
+  -- C
+
+  -- D"
+    );
+}
+
+#[test]
 fn escape_comment() {
     // Standalone string (not sequence), no escaping
     test!(&s("--"), "--");
