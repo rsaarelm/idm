@@ -257,8 +257,8 @@ fn section_tuple() {
 
     test!(
         &vec![(
-            "Lorem".to_string(),
-            "ipsum dolor sit amet\nconsectetur adipiscing elit".to_string(),
+            s("Lorem"),
+            s("ipsum dolor sit amet\nconsectetur adipiscing elit"),
         )],
         "\
 Lorem
@@ -386,10 +386,7 @@ foo"
 #[test]
 fn map() {
     test!(
-        &BTreeMap::from_iter(vec![
-            ("bar".to_string(), 1),
-            ("foo".to_string(), 2),
-        ]),
+        &BTreeMap::from_iter(vec![(s("bar"), 1), (s("foo"), 2),]),
         "\
 bar 1
 foo 2",
@@ -402,8 +399,8 @@ foo
 
     test!(
         &BTreeMap::from_iter(vec![
-            ("bar".to_string(), vec![1, 2, 3]),
-            ("foo".to_string(), vec![2, 3, 4]),
+            (s("bar"), vec![1, 2, 3]),
+            (s("foo"), vec![2, 3, 4]),
         ]),
         "\
 bar 1 2 3
@@ -472,8 +469,8 @@ fn map_structs() {
 
     test!(
         &BTreeMap::from_iter(vec![
-            ("one".to_string(), Simple { x: 3, y: 4 }),
-            ("two".to_string(), Simple { x: 5, y: 6 }),
+            (s("one"), Simple { x: 3, y: 4 }),
+            (s("two"), Simple { x: 5, y: 6 }),
         ]),
         "\
 one
@@ -601,7 +598,7 @@ B",
         &Recursive {
             a: 1,
             _contents: BTreeMap::from_iter(vec![(
-                "x".to_string(),
+                s("x"),
                 Recursive {
                     a: 2,
                     ..Default::default()
@@ -618,7 +615,7 @@ x
         &Recursive {
             a: 0,
             _contents: BTreeMap::from_iter(vec![(
-                "item".to_string(),
+                s("item"),
                 Recursive {
                     a: 1,
                     ..Default::default()
@@ -634,11 +631,11 @@ item
         &Recursive {
             a: 0,
             _contents: BTreeMap::from_iter(vec![(
-                "items".to_string(),
+                s("items"),
                 Recursive {
                     a: 0,
                     _contents: BTreeMap::from_iter(vec![(
-                        "item".to_string(),
+                        s("item"),
                         Recursive {
                             a: 1,
                             ..Default::default()
@@ -689,29 +686,29 @@ fn nesting_contents() {
     #[rustfmt::skip]
     let starmap = BTreeMap::from_iter(
         vec![
-            ("Sol".to_string(),
+            (s("Sol"),
              Star { age: 4.6e9, mass: 1.0,
                     _contents: BTreeMap::from_iter(
                         vec![
-                            ("Mercury".to_string(),
+                            (s("Mercury"),
                              Planet { orbit: 0.39, mass: 0.055 }),
-                            ("Venus".to_string(),
+                            (s("Venus"),
                              Planet { orbit: 0.72, mass: 0.815 }),
-                            ("Earth".to_string(),
+                            (s("Earth"),
                              Planet { orbit: 1.0, mass: 1.0 }),
-                            ("Mars".to_string(),
+                            (s("Mars"),
                              Planet { orbit: 1.52, mass: 0.1 })
                         ].into_iter(),
                     ),
                 },
             ),
-            ("Alpha Centauri".to_string(),
+            (s("Alpha Centauri"),
              Star { age: 5.3e9, mass: 1.1,
                     _contents: BTreeMap::from_iter(
                         vec![
-                            ("Eurytion".to_string(),
+                            (s("Eurytion"),
                              Planet { orbit: 0.47, mass: 0.08 }),
-                            ("Chiron".to_string(),
+                            (s("Chiron"),
                              Planet { orbit: 1.32, mass: 1.33 }),
                         ].into_iter(),
                     ),
