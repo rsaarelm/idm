@@ -546,6 +546,40 @@ fn indented_vector_struct() {
     );
 }
 
+#[test]
+fn options_struct() {
+    #[derive(Clone, Eq, PartialEq, Default, Debug, Serialize, Deserialize)]
+    struct Options {
+        a: Option<i32>,
+        b: Option<i32>,
+        c: Option<i32>,
+    }
+
+    test!(
+        &vec![
+            Options {
+                a: Some(1),
+                ..Default::default()
+            },
+            Options {
+                b: Some(2),
+                ..Default::default()
+            },
+            Options {
+                c: Some(3),
+                ..Default::default()
+            },
+        ],
+        "\
+--
+  a: 1
+--
+  b: 2
+--
+  c: 3"
+    );
+}
+
 /*
 #[test]
 fn struct_flatten() {

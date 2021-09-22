@@ -138,6 +138,10 @@ impl Value {
 #[derive(Eq, PartialEq, Clone, Debug)]
 enum Expr {
     /// Empty expression.
+    ///
+    /// Can be used to mark items in structural values that will be omitted
+    /// from the whole, like `None` values for struct fields which will lead
+    /// to the whole field omitted from the serialized struct.
     None,
     /// Expression in raw mode (printing outlines). Cannot be inlined.
     Raw(Box<Expr>),
@@ -586,7 +590,7 @@ impl<'a> ser::Serializer for &'a mut Serializer {
     }
 
     fn serialize_none(self) -> Result<Expr> {
-        return err!("Cannot serialize None values");
+        Ok(Expr::None)
     }
 
     fn serialize_some<T>(self, value: &T) -> Result<Expr>
