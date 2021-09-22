@@ -45,9 +45,9 @@ pub enum SequencePos {
     /// Currently parsed sequence is at the first element of a tuple. Special
     /// parsing rules may be in effect.
     TupleStart,
-    /// Currently parsed sequence is at the last element of a tuple. Special
-    /// parsing rules may be in effect.
-    TupleEnd,
+    /// Currently parsed sequence is at the second element of a pair tuple.
+    /// Special parsing rules may be in effect.
+    SecondOfPair,
 }
 
 impl<'a> Parser<'a> {

@@ -165,14 +165,10 @@ impl<'a, 'de> de::Deserializer<'de> for &'a mut Deserializer<'de> {
         use Shape::*;
         self.parser.verify_seq_startable()?;
 
-        // NB: Merging is only supported for variable-length seqs, not tuples.
-        // It would mess up tuple/fixed-width-array matrices otherwise.
-        // It's sort of an iffy feature overall, but is needed to make
-        // deserializing into the canonical Outline datatype work.
-        if self.parser.seq_pos == Some(SequencePos::TupleEnd) {
-            // Skip entering body when doing merged sequence.
+        // Part of section-like tuple, treat as part of tuple.
+        if self.parser.seq_pos == Some(SequencePos::SecondOfPair) {
             self.parser.seq_pos = None;
-            return visitor.visit_seq(Sequence::new(self).merged());
+            return visitor.visit_seq(Sequence::new(self).do_not_exit());
         }
 
         match self.parser.lexer.classify() {
@@ -256,6 +252,18 @@ impl<'a, 'de> de::Deserializer<'de> for &'a mut Deserializer<'de> {
     {
         self.parser.verify_seq_startable()?;
 
+        // Part of section-like tuple, treat as part of tuple.
+        if self.parser.seq_pos == Some(SequencePos::SecondOfPair) {
+            self.parser.seq_pos = None;
+
+            // XXX: Why do I need to do this for a no-exit block?
+            self.parser.lexer.enter_body()?;
+
+            return visitor.visit_map(
+                Sequence::new(self).do_not_exit(),
+            );
+        }
+
         self.parser.lexer.enter_body()?;
         visitor.visit_map(Sequence::new(self))
     }
@@ -270,6 +278,18 @@ impl<'a, 'de> de::Deserializer<'de> for &'a mut Deserializer<'de> {
         V: de::Visitor<'de>,
     {
         self.parser.verify_seq_startable()?;
+
+        // Part of section-like tuple, treat as part of tuple.
+        if self.parser.seq_pos == Some(SequencePos::SecondOfPair) {
+            self.parser.seq_pos = None;
+
+            // XXX: Why do I need to do this for a no-exit block?
+            self.parser.lexer.enter_body()?;
+
+            return visitor.visit_map(
+                Sequence::new(self).as_struct(fields).do_not_exit(),
+            );
+        }
 
         self.parser.lexer.enter_body()?;
         visitor.visit_map(Sequence::new(self).as_struct(fields))
@@ -310,7 +330,7 @@ struct Sequence<'a, 'de: 'a> {
     idx: usize,
     // True if sequence is merged into an outer sequence, do not call exit
     // body on such sequence.
-    is_merged: bool,
+    call_exit: bool,
     // True if deserializing a struct. Struct keys are read using read_key.
     is_struct: bool,
     struct_fields: HashSet<&'static str>,
@@ -324,7 +344,7 @@ impl<'a, 'de> Sequence<'a, 'de> {
             de,
             tuple_length: None,
             idx: 0,
-            is_merged: false,
+            call_exit: true,
             is_struct: false,
             struct_fields: Default::default(),
             contents_mode: false,
@@ -336,8 +356,8 @@ impl<'a, 'de> Sequence<'a, 'de> {
         self
     }
 
-    fn merged(mut self) -> Sequence<'a, 'de> {
-        self.is_merged = true;
+    fn do_not_exit(mut self) -> Sequence<'a, 'de> {
+        self.call_exit = false;
         self
     }
 
@@ -353,7 +373,7 @@ impl<'a, 'de> Sequence<'a, 'de> {
     fn exit(&mut self) -> Result<()> {
         if self.de.parser.mode.is_inline() {
             self.de.parser.lexer.exit_words()?;
-        } else if !self.is_merged {
+        } else if self.call_exit {
             self.de.parser.lexer.exit_body()?;
         }
         self.de.parser.mode = ParsingMode::Block;
@@ -378,7 +398,11 @@ impl<'a, 'de> de::SeqAccess<'de> for Sequence<'a, 'de> {
         if self.tuple_length.is_some() && self.idx == 0 {
             self.de.parser.seq_pos = Some(SequencePos::TupleStart);
         } else if self.tuple_length == Some(self.idx + 1) {
-            self.de.parser.seq_pos = Some(SequencePos::TupleEnd);
+            if self.idx == 1 {
+                self.de.parser.seq_pos = Some(SequencePos::SecondOfPair);
+            } else {
+                self.de.parser.seq_pos = None;
+            }
             // Switch to line mode for last element of tuple, allow multiple
             // words.
             if self.de.parser.mode.is_inline() {

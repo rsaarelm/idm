@@ -517,6 +517,35 @@ v:
     );
 }
 
+#[test]
+fn indented_vector_struct() {
+    #[derive(Clone, Eq, PartialEq, Default, Debug, Serialize, Deserialize)]
+    struct Vectored {
+        v: Vec<i32>,
+        x: Option<i32>,
+    }
+
+    test!(
+        &vec![
+            Vectored {
+                v: vec![1, 2],
+                x: Some(3)
+            },
+            Vectored {
+                v: vec![4, 5],
+                x: Some(6)
+            },
+        ],
+        "\
+--
+  v: 1 2
+  x: 3
+--
+  v: 4 5
+  x: 6"
+    );
+}
+
 /*
 #[test]
 fn struct_flatten() {
@@ -660,11 +689,124 @@ fn oneshot_section() {
     }
 
     test!(
-        &vec![("Headline".to_string(), Data { x: 1, y: 2 })],
+        &vec![(s("Headline"), Data { x: 1, y: 2 })],
         "\
 Headline
   x: 1
   y: 2",
+    );
+}
+
+#[test]
+fn oneshot_section_struct_vec() {
+    #[derive(Clone, Eq, PartialEq, Default, Debug, Serialize, Deserialize)]
+    struct Data2 {
+        a: String,
+        b: Vec<String>,
+        c: Option<String>,
+    }
+
+    test!(
+        &vec![(
+            Raw(s("Some words")),
+            Data2 {
+                a: s("a"),
+                b: vec![s("b1"), s("b2")],
+                c: Some(s("c"))
+            }
+        )],
+        "\
+Some words
+  a: a
+  b: b1 b2
+  c: c",
+    );
+
+    test!(
+        &vec![
+            (
+                Raw(s("Some words")),
+                Data2 {
+                    a: s("a"),
+                    b: vec![s("b1"), s("b2")],
+                    c: Some(s("c"))
+                }
+            ),
+            (
+                Raw(s("Second run")),
+                Data2 {
+                    a: s("a"),
+                    b: vec![s("b1"), s("b2")],
+                    c: Some(s("c"))
+                }
+            )
+        ],
+        "\
+Some words
+  a: a
+  b: b1 b2
+  c: c
+Second run
+  a: a
+  b: b1 b2
+  c: c",
+    );
+}
+
+#[test]
+fn oneshot_section_map_vec() {
+    test!(
+        &vec![(
+            Raw(s("Some words")),
+            BTreeMap::from_iter(
+                vec![(s("a"), vec![1, 2]), (s("b"), vec![3, 4])].into_iter()
+            )
+        )],
+        "\
+Some words
+  a 1 2
+  b 3 4"
+    );
+
+    test!(
+        &vec![
+            (
+                Raw(s("Some words")),
+                BTreeMap::from_iter(
+                    vec![(s("a"), vec![1, 2]), (s("b"), vec![3, 4])]
+                        .into_iter()
+                )
+            ),
+            (
+                Raw(s("Second run")),
+                BTreeMap::from_iter(
+                    vec![(s("a"), vec![1, 2]), (s("b"), vec![3, 4])]
+                        .into_iter()
+                )
+            )
+        ],
+        "\
+Some words
+  a 1 2
+  b 3 4
+Second run
+  a 1 2
+  b 3 4"
+    );
+}
+
+#[test]
+fn oneshot_section_tuples() {
+    test!(
+        &vec![(
+            Raw(s("Some words")),
+            ((1, 2, 3, vec![4, 5, 6]), (4, 5, 6), (7, 8, 9))
+        )],
+        "\
+Some words
+  1 2 3 4 5 6
+  4 5 6
+  7 8 9"
     );
 }
 
