@@ -7,7 +7,7 @@ pub use error::{Error, Result};
 mod lexer;
 
 mod outline;
-pub use outline::{Raw, Outline, Section};
+pub use outline::{Outline, Raw, Section};
 
 mod parser;
 
@@ -18,4 +18,4 @@ pub use ser::{to_string, to_string_styled, to_string_styled_like, Style};
 mod tests;
 
 mod util;
-pub use util::guess_indent_style;
+pub use util::{guess_indent_style, infer_indent_style};
