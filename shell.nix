@@ -12,6 +12,6 @@ pkgs.mkShell {
     just linuxPackages.perf
   ];
 
-  RUST_BACKTRACE = "1";
+  RUST_BACKTRACE = "full";
   RUST_LOG = "idm=${log_level}";
 }
