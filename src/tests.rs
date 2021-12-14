@@ -435,7 +435,7 @@ fn simple_struct() {
         "\
 name-text: Foo bar
 x: 1
-y: 2",
+y: 2"
     );
 
     // Must fail if there's no _contents field to grab contents
@@ -457,6 +457,27 @@ y: 2
 unexpected: stuff"
     )
     .is_err());
+}
+
+#[test]
+fn struct_block_value() {
+    #[derive(Clone, Eq, PartialEq, Default, Debug, Serialize, Deserialize)]
+    struct Simple {
+        name_text: String,
+        x: i32,
+    }
+
+    test!(
+        &Simple {
+            name_text: s("Foo\nbar"),
+            x: 1,
+        },
+        "\
+name-text:
+  Foo
+  bar
+x: 1"
+    );
 }
 
 #[test]

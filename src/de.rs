@@ -559,7 +559,7 @@ impl<'a, 'de> de::MapAccess<'de> for Sequence<'a, 'de> {
 
         let ret = seed.deserialize(&mut *self.de).map(Some);
 
-        if !self.is_struct && is_outline_value {
+        if !self.contents_mode && is_outline_value {
             self.de.parser.lexer.dedent();
         }
 
