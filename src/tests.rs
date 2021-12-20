@@ -442,6 +442,13 @@ name-text: Foo bar
 x: 1
 y: 2",
         "\
+-- Comments
+
+-- and blank lines
+name-text: Foo bar
+x: 1
+y: 2",
+        "\
 name-text: Foo bar
 -- Comment in the middle
 x: 1

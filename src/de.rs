@@ -500,7 +500,7 @@ impl<'a, 'de> de::MapAccess<'de> for Sequence<'a, 'de> {
             .parser
             .lexer
             .classify()
-            .map_or(false, |c| c.is_standalone_comment())
+            .map_or(false, |c| c.is_standalone_comment() | c.is_blank())
         {
             self.de.parser.lexer.skip()?;
         }
