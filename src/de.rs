@@ -259,9 +259,7 @@ impl<'a, 'de> de::Deserializer<'de> for &'a mut Deserializer<'de> {
             // XXX: Why do I need to do this for a no-exit block?
             self.parser.lexer.enter_body()?;
 
-            return visitor.visit_map(
-                Sequence::new(self).do_not_exit(),
-            );
+            return visitor.visit_map(Sequence::new(self).do_not_exit());
         }
 
         self.parser.lexer.enter_body()?;
@@ -494,6 +492,17 @@ impl<'a, 'de> de::MapAccess<'de> for Sequence<'a, 'de> {
             // Similar to merged mode. Deserializing contents object should
             // have handled the stack.
             return Ok(None);
+        }
+
+        // Eat comments
+        while self
+            .de
+            .parser
+            .lexer
+            .classify()
+            .map_or(false, |c| c.is_standalone_comment())
+        {
+            self.de.parser.lexer.skip()?;
         }
 
         // Is the value an outline as in

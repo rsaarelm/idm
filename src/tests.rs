@@ -435,7 +435,22 @@ fn simple_struct() {
         "\
 name-text: Foo bar
 x: 1
-y: 2"
+y: 2",
+        "\
+-- Comment at start.
+name-text: Foo bar
+x: 1
+y: 2",
+        "\
+name-text: Foo bar
+-- Comment in the middle
+x: 1
+y: 2",
+        "\
+name-text: Foo bar
+x: 1
+y: 2
+-- Comment at end"
     );
 
     // Must fail if there's no _contents field to grab contents
