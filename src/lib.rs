@@ -19,3 +19,7 @@ mod tests;
 
 mod util;
 pub use util::{guess_indent_style, infer_indent_style};
+
+#[cfg(doctest)]
+#[doc = include_str!("../README.md")]
+pub struct ReadmeDoctests;

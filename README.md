@@ -31,13 +31,13 @@ two spaces per level of indetation.
 There are three general shapes for a complex value, a
 *line*:
 
-```
+```notrust
 a b c
 ```
 
 a *block* of multiple lines at the same indent depth:
 
-```
+```notrust
 a b
 c
 d e f
@@ -45,7 +45,7 @@ d e f
 
 and a *section* with a headline and an indented block body:
 
-```
+```notrust
 a b
   c
   d e f
@@ -53,7 +53,7 @@ a b
 
 Dedents must match the corresponding indents. This is fine:
 
-```
+```notrust
 a
     b
         c
@@ -62,7 +62,7 @@ a
 
 This is an error, the dedent for `d` does not match any preceding indent level:
 
-```
+```notrust
 a
     b
         c
@@ -91,7 +91,7 @@ Non-inline sequential IDM items, seqs, tuples and structs, can have blank
 lines and comment lines that are ignored when parsing. Comment lines begin
 with `--`.
 
-```
+```notrust
 Data
   x: 1
   y: 2
@@ -103,7 +103,7 @@ Data
 Comments also serve as syntax, they are needed to block out outline elements
 in a nested list:
 
-```
+```notrust
 Tables
   --
     1 2
@@ -115,7 +115,7 @@ Tables
 
 Comments are not parsed in `Raw` values and outline literals.
 
-```
+```notrust
 Text paragraphs
   -- This is a comment, dropped when parsing
     This is a paragraph of text, all is parsed verbatim
@@ -152,7 +152,7 @@ field name that starts with double underline, `__not_comment`, becomes
 
 An IDM outline like
 
-```
+```notrust
 Sol
   age: 4.6e9
   mass: 1.0
@@ -173,6 +173,9 @@ Alpha Centauri
 can be deserialized into a nested `Starmap` type:
 
 ```rust
+use serde::{Serialize, Deserialize};
+use std::collections::BTreeMap;
+
 type Starmap = BTreeMap<String, Star>;
 
 #[derive(Clone, PartialEq, Default, Debug, Serialize, Deserialize)]
@@ -298,7 +301,9 @@ be a single section with a missing headline at line -1 and depth -1.
 
 * To set up the locally versioned githooks, do
 
-    git config --local core.hooksPath githooks/
+```notrust
+git config --local core.hooksPath githooks/
+```
 
 ## License
 
