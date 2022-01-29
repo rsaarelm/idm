@@ -296,6 +296,10 @@ be a single section with a missing headline at line -1 and depth -1.
   fields, because these cannot be syntactically distinguished from the fields
   of the parent struct. You usually want it to be a map type.
 
+* To set up the locally versioned githooks, do
+
+    git config --local core.hooksPath githooks/
+
 ## License
 
 IDM is dual-licensed under Apache-2.0 and MIT.

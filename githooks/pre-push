@@ -1,0 +1,4 @@
+# Main program unit tests
+set -e
+cargo fmt --all -- --check
+cargo test --all
