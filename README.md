@@ -81,7 +81,7 @@ tuples to have spaces in the last value.
 
 ```rust
 assert_eq!(
-    idm::from_str::<Vec<(String, String)>>("A B C").unwrap(),
+    idm::from_str::<Vec<(String, String)>>("A B C\n").unwrap(),
     vec![("A".to_string(), "B C".to_string())]);
 ```
 

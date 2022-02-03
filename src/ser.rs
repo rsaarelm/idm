@@ -423,13 +423,11 @@ impl Style {
                 if expr.is_line_or_section() {
                     match es.as_slice() {
                         [head, body] => {
-                            if head.is_blank_line() {
-                                writeln!(f)?;
-                            } else {
+                            if !head.is_blank_line() {
                                 self.indent(f, depth)?;
                                 self.expr_inline(f, head)?;
-                                writeln!(f)?;
                             }
+                            writeln!(f)?;
 
                             self.expr_outline(f, depth + 1, body)?;
 

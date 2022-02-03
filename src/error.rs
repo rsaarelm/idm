@@ -66,6 +66,12 @@ impl Error {
     }
 }
 
+impl<'a> From<&'a str> for Error {
+    fn from(s: &'a str) -> Self {
+        Error::new(s.to_string())
+    }
+}
+
 #[macro_export(local_inner_macros)]
 macro_rules! err {
     () => {

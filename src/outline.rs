@@ -106,7 +106,7 @@ impl fmt::Debug for Outline {
                     write!(f, "  ")?;
                 }
                 writeln!(f, "{:?}", title)?;
-                print(f, depth + 1, &body)?;
+                print(f, depth + 1, body)?;
             }
 
             Ok(())

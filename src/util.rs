@@ -39,7 +39,7 @@ pub fn infer_indent_style(input: &str) -> Option<Style> {
 ///
 /// Can be passed to the serializer to reserialize data in the same style.
 pub fn guess_indent_style(input: &str) -> Style {
-    infer_indent_style(input).unwrap_or_else(|| Default::default())
+    infer_indent_style(input).unwrap_or_default()
 }
 
 #[cfg(test)]

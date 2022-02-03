@@ -35,12 +35,34 @@ fn atom() {
 }
 
 #[test]
+fn primitives() {
+    test!(&-128i8, "-128");
+    test!(&255u8, "255");
+    test!(&-30000i16, "-30000");
+    test!(&60000u16, "60000");
+    test!(&-2000000000i32, "-2000000000");
+    test!(&4000000000u32, "4000000000");
+    test!(&-9000000000000000000i64, "-9000000000000000000");
+    test!(&10000000000000000000u64, "10000000000000000000");
+    test!(&-12.3e4f32, "-123000", "-12.3e4");
+    test!(&-12.3e4f64, "-123000", "-12.3e4");
+    test!(&'@', "@");
+    test!(&true, "true");
+    test!(&false, "false");
+}
+
+#[test]
 fn simple_sequence() {
-    test!(&vec![s("foo"), s("bar"), s("baz")], "foo\nbar\nbaz");
-    test!(&vec![1, 2, 3], "1\n2\n3");
+    // Test inline fragments.
+    test!(
+        &vec![s("foo"), s("bar"), s("baz")],
+        "foo\nbar\nbaz",
+        "foo bar baz"
+    );
+    test!(&vec![1, 2, 3], "1\n2\n3", "1 2 3");
     test!(&(1, 2, 3), "1\n2\n3");
 
-    test!(&vec![(Some(s("A")), 2)], "A 2");
+    test!(&vec![(Some(s("A")), 2)], "A 2\n");
 
     // Raw forces section when you could be inlined otherwise.
     test!(
@@ -237,7 +259,7 @@ Beware the Jubjub bird, and shun
 fn section_tuple() {
     test!(
         &vec![(1, 2)],
-        "1 2",
+        "1 2\n",
         "\
 1
   2"
@@ -271,11 +293,11 @@ Lorem
 fn tuple_tail_line_mode() {
     // Can still inline things if the last tuple item isn't a word token.
 
-    test!(&vec![(s("Foo"), s("Bar Baz Quux"))], "Foo Bar Baz Quux");
+    test!(&vec![(s("Foo"), s("Bar Baz Quux"))], "Foo Bar Baz Quux\n");
 
     test!(
         &vec![(s("Foo"), s("Bar"), s("Baz Quux"))],
-        "Foo Bar Baz Quux"
+        "Foo Bar Baz Quux\n"
     );
 
     // Now it's not the last item that's line-like, have to go block mode.
@@ -290,10 +312,25 @@ fn tuple_tail_line_mode() {
 }
 
 #[test]
+fn tuple_tail_option() {
+    let val: (i32, i32, Option<i32>) = (1, 2, Some(3));
+    test!(
+        &val, "1
+2
+3"
+    );
+    let val: (i32, i32, Option<i32>) = (1, 2, None);
+    test!(
+        &val, "1
+2"
+    );
+}
+
+#[test]
 fn basic_outlines() {
     test!(&Outline::default(), "");
 
-    test!(&outline!["Xyzzy"], "Xyzzy");
+    test!(&outline!["Xyzzy"], "Xyzzy\n");
 
     test!(&outline!["A", "B"], "A\nB");
     test!(&outline!["A", "B", "C"], "A\nB\nC");
@@ -534,7 +571,7 @@ fn vector_struct() {
 
     test!(
         &Vectored { v: vec![1, 2, 3] },
-        "v: 1 2 3",
+        "v: 1 2 3\n",
         "\
 v:
   1
@@ -551,7 +588,7 @@ v:
         &VectoredString {
             v: vec![s("a"), s("b"), s("c")],
         },
-        "v: a b c",
+        "v: a b c\n",
         "\
 v:
   a
@@ -670,6 +707,19 @@ fn struct_contents() {
 x: 1
 y: 2
 A
+\tB",
+    );
+
+    test!(
+        &Contentful {
+            x: 1,
+            y: 2,
+            _contents: outline![["-- Must catch comments here", "B"]],
+        },
+        "\
+x: 1
+y: 2
+-- Must catch comments here
 \tB",
     );
 
@@ -1042,7 +1092,8 @@ fn comment_value() {
     test!(
         &Ch { c: "--".into() },
         "\
-c: --",
+c: --
+",
     );
 }
 
@@ -1063,6 +1114,7 @@ where
         .expect("Value did not serialize to IDM");
 
     let reser = reser.trim_end();
+    let idm = idm.trim_end();
 
     if idm != reser {
         println!("Deserialized \n\x1b[1;32m{}\x1b[0m", idm);
