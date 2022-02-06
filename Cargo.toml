@@ -3,7 +3,7 @@ name = "idm"
 version = "0.3.0-dev"
 license = "MIT/Apache-2.0"
 authors = ["Risto Saarelma <risto.saarelma@iki.fi>"]
-edition = "2018"
+edition = "2021"
 description = "Implicit Data Markup"
 categories = ["encoding"]
 
