@@ -25,7 +25,7 @@ pub fn word(input: &str) -> Result<&str> {
     }
 }
 
-pub fn attribute_name(input: &str) -> Result<String> {
+pub fn rust_attribute_name(input: &str) -> Result<String> {
     let (word, rest) = word(input)?;
 
     // Convert from IDM's kebab-case to Rust's camel_case.

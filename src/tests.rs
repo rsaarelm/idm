@@ -1135,6 +1135,117 @@ c: --
     );
 }
 
+#[test]
+fn test_generic_attributes() {
+    #[derive(PartialEq, Default, Debug, Serialize, Deserialize)]
+    struct Partial {
+        a: u32,
+        _attributes: BTreeMap<String, u32>,
+    }
+
+    test!(
+        &Partial {
+            a: 1,
+            _attributes: BTreeMap::from_iter(vec![(s("b"), 2)].into_iter())
+        },
+        "\
+a: 1
+b: 2"
+    );
+
+    test!(
+        &Partial {
+            a: 1,
+            _attributes: BTreeMap::from_iter(
+                vec![
+                    (s("b"), 2),
+                    // Note that _attributes fields do not get converted to
+                    // camel_case from kebab-case.
+                    (s("foo-bar"), 6),
+                    (s("xyzzy"), 5)
+                ]
+                .into_iter()
+            )
+        },
+        "\
+a: 1
+b: 2
+foo-bar: 6
+xyzzy: 5"
+    );
+}
+
+#[test]
+fn test_attribute_outline_1() {
+    #[derive(PartialEq, Default, Debug, Serialize, Deserialize)]
+    struct AnyStruct {
+        #[serde(default)]
+        _attributes: Vec<(String, String)>,
+        #[serde(default)]
+        _contents: Vec<(Raw<String>, AnyStruct)>,
+    }
+
+    test!(&AnyStruct::default(), "");
+
+    test!(
+        &AnyStruct {
+            _contents: vec![(Raw(s("A")), AnyStruct::default())],
+            ..Default::default()
+        },
+        "A"
+    );
+
+    test!(
+        &AnyStruct {
+            _contents: vec![(
+                Raw(s("Title")),
+                AnyStruct {
+                    _attributes: vec![(s("attr"), s("123"))],
+                    _contents: vec![(Raw(s("Subpage")), AnyStruct::default())]
+                }
+            )],
+            ..Default::default()
+        },
+        "\
+Title
+  attr: 123
+  Subpage"
+    );
+}
+
+#[test]
+fn test_attribute_outline_2() {
+    // StructOutline first version, not the idiomatic way.
+    // Gives different errors though.
+    #[derive(PartialEq, Default, Debug, Serialize, Deserialize)]
+    struct AnyStruct {
+        #[serde(default)]
+        _attributes: Vec<(String, String)>,
+        #[serde(default)]
+        _contents: StructOutline,
+    }
+
+    type StructOutline = Vec<(Raw<String>, AnyStruct)>;
+
+    test!(&StructOutline::default(), "");
+
+    test!(&vec![(Raw(s("A")), AnyStruct::default())], "A");
+
+    test!(
+        &vec![(
+            Raw(s("Title")),
+            AnyStruct {
+                _attributes: vec![(s("attr"), s("123"))],
+                _contents: vec![(Raw(s("Subpage")), AnyStruct::default())]
+            }
+        )],
+        "\
+Title
+  attr: 123
+  Subpage"
+    );
+}
+
 ////////////////////////////////
 // Helper functions
 

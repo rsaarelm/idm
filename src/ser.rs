@@ -858,6 +858,28 @@ impl<'a> ser::SerializeStruct for MapSerializer {
             if key == "_contents" {
                 // Magic contents key!
                 self.contents = value;
+            } else if key == "_attributes" {
+                // XXX: Fix repeating error message.
+                if let Seq(es) = value {
+                    for e in &es {
+                        if let Tuple(t) = e {
+                            if let [Atom(Word(k)), v] = t.as_slice() {
+                                self.values.push((
+                                    Atom(Word(format!("{}:", k))),
+                                    v.clone(),
+                                ));
+                            } else {
+                                return err!("_attributes value does not look like a map");
+                            }
+                        } else {
+                            return err!(
+                                "_attributes value does not look like a map"
+                            );
+                        }
+                    }
+                    return Ok(());
+                }
+                return err!("_attributes value does not look like a map");
             } else if key.starts_with('_') {
                 // Refuse to emit keys that might look like comments when
                 // converted to kebab-case.

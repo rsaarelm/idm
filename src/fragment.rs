@@ -1,6 +1,7 @@
 use std::{borrow::Cow, fmt, rc::Rc};
 
 use crate::{
+    err,
     parse::{self, CharExt, Indent},
     Error, Result,
 };
@@ -12,6 +13,7 @@ pub enum Fragment<'a> {
     Empty,
     /// A single (non-empty) line.
     Line(&'a str),
+    DecolonLine(&'a str),
     /// A section with a (non-empty) indented body.
     ///
     /// The head is `Line` and the body is `Block`.
@@ -35,7 +37,7 @@ pub enum Fragment<'a> {
     ConstName {
         text: String,
         // Keep a reference to actual input text so we can get a line number.
-        input_pos: &'a str,
+        input_pos: Option<&'a str>,
     },
 }
 
@@ -148,6 +150,22 @@ impl<'a> Fragment<'a> {
                             writeln!(f)?;
                         }
                     }
+                    DecolonLine(line) => {
+                        if line != &"" {
+                            let colon_pos = line
+                                .find(':')
+                                .expect("No colon in DecolonLine");
+                            writeln!(
+                                f,
+                                "{}{}{}",
+                                indent,
+                                &line[0..colon_pos],
+                                &line[colon_pos + 1..]
+                            )?;
+                        } else {
+                            writeln!(f)?;
+                        }
+                    }
                     Empty => {
                         writeln!(f)?;
                     }
@@ -170,9 +188,26 @@ impl<'a> Fragment<'a> {
             Block { first, next } => {
                 match &**first {
                     s @ Section { .. } => s.print_section(indent, f)?,
+                    // XXX: Lots of repetition from print_section
                     Line(line) => {
                         if line != &"" {
                             writeln!(f, "{}{}", indent, line)?;
+                        } else {
+                            writeln!(f)?;
+                        }
+                    }
+                    DecolonLine(line) => {
+                        if line != &"" {
+                            let colon_pos = line
+                                .find(':')
+                                .expect("No colon in DecolonLine");
+                            writeln!(
+                                f,
+                                "{}{}{}",
+                                indent,
+                                &line[0..colon_pos],
+                                &line[colon_pos + 1..]
+                            )?;
                         } else {
                             writeln!(f)?;
                         }
@@ -188,13 +223,13 @@ impl<'a> Fragment<'a> {
     pub fn str_slice(&self) -> Option<&'a str> {
         match self {
             Empty => None,
-            Line(s) => Some(s),
+            Line(s) | DecolonLine(s) => Some(s),
             Section { head, body, .. } => {
                 head.str_slice().or_else(|| body.str_slice())
             }
             Block { first, .. } => first.str_slice(),
             Phrase(s) => Some(s),
-            ConstName { input_pos, .. } => Some(input_pos),
+            ConstName { input_pos, .. } => *input_pos,
         }
     }
 
@@ -208,6 +243,10 @@ impl<'a> Fragment<'a> {
 
     pub fn is_inline(&self) -> bool {
         !matches!(self, Block { .. } | Section { .. } | Empty)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        matches!(self, Empty)
     }
 
     /// If fragment is commenty, return the comment-less version.
@@ -230,8 +269,7 @@ impl<'a> Fragment<'a> {
 
     pub fn rewrite(&mut self, text: impl Into<String>) {
         let text: String = text.into();
-        let input_pos =
-            self.str_slice().expect("Cannot rewrite Empty fragment");
+        let input_pos = self.str_slice();
         *self = ConstName { text, input_pos };
     }
 
@@ -239,6 +277,14 @@ impl<'a> Fragment<'a> {
         match self {
             Block { .. } | Section { .. } => Cow::from(self.to_string()),
             Line(l) | Phrase(l) => Cow::from(*l),
+            DecolonLine(l) => {
+                let colon_pos = l.find(':').expect("No colon in DecolonLine");
+                Cow::from(format!(
+                    "{}{}",
+                    &l[0..colon_pos],
+                    &l[colon_pos + 1..]
+                ))
+            }
             Empty => Cow::from(""),
             ConstName { text, .. } => Cow::from(text.clone()),
         }
@@ -252,6 +298,21 @@ impl<'a> Fragment<'a> {
                 } else if let Ok((p, rest)) = parse::word(s) {
                     Some((
                         Phrase(p),
+                        if rest.chars().all(CharExt::is_idm_whitespace) {
+                            Empty
+                        } else {
+                            Line(rest)
+                        },
+                    ))
+                } else {
+                    None
+                }
+            }
+            DecolonLine(s) => {
+                if let Ok((p, rest)) = parse::word(s) {
+                    let decolon = &p[0..p.len() - 1];
+                    Some((
+                        Phrase(decolon),
                         if rest.chars().all(CharExt::is_idm_whitespace) {
                             Empty
                         } else {
@@ -277,6 +338,37 @@ impl<'a> Fragment<'a> {
     pub fn split_raw(self) -> Option<(Self, Self)> {
         self._split(true)
     }
+
+    pub fn decolonate(self) -> Result<Self> {
+        match self {
+            Empty => Ok(Empty),
+            Line(s) => Ok(DecolonLine(s)),
+            Section {
+                head,
+                body_indent,
+                body,
+            } => Ok(Section {
+                head: (*head).clone().decolonate()?.into(),
+                body_indent,
+                body: body.clone(),
+            }),
+            _ => err!("Bad attribute fragment"),
+        }
+    }
+
+    pub fn join(self, other: Self) -> Self {
+        match self {
+            Empty => Block {
+                first: other.into(),
+                next: Empty.into(),
+            },
+            Block { first, next } => Block {
+                first: first.clone(),
+                next: (*next).clone().join(other).into(),
+            },
+            _ => panic!("Cannot join fragments"),
+        }
+    }
 }
 
 impl<'a> Default for Fragment<'a> {
@@ -290,6 +382,10 @@ impl<'a> fmt::Display for Fragment<'a> {
         match self {
             Empty => Ok(()),
             Line(l) | Phrase(l) => l.fmt(f),
+            DecolonLine(l) => {
+                let colon_pos = l.find(':').expect("No colon in DecolonLine");
+                write!(f, "{}{}", &l[0..colon_pos], &l[colon_pos + 1..])
+            }
             s @ Section { .. } => s.print_section(Default::default(), f),
             b @ Block { .. } => b.print_block(Default::default(), f),
             ConstName { text, .. } => write!(f, "{}", text),

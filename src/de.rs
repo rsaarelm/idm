@@ -343,7 +343,9 @@ struct Sequence<'de> {
     tuple_length: Option<usize>,
     idx: usize,
     struct_fields: Option<&'static [&'static str]>,
-    map_element: Option<Deserializer<'de>>,
+    value_fragment: Option<Deserializer<'de>>,
+    /// Extra code for generic attributes is created here, then serialized.
+    attributes_bin: Fragment<'de>,
 }
 
 impl<'de> Sequence<'de> {
@@ -354,7 +356,8 @@ impl<'de> Sequence<'de> {
             tuple_length: None,
             idx: 0,
             struct_fields: None,
-            map_element: None,
+            value_fragment: None,
+            attributes_bin: Fragment::Empty,
         }
     }
 
@@ -370,6 +373,135 @@ impl<'de> Sequence<'de> {
 
     fn contains_field(&self, field: &str) -> bool {
         self.struct_fields.map_or(false, |s| s.contains(&field))
+    }
+
+    fn map_key_seed<K>(&mut self, seed: K) -> Result<Option<K::Value>>
+    where
+        K: de::DeserializeSeed<'de>,
+    {
+        self.value_fragment = self
+            .fragment
+            .find_map(Fragment::comment_filter)
+            .map(|f| self.fragment.spawn(f));
+        if let Some(elt) = self.value_fragment.as_mut() {
+            let key = elt
+                .next()
+                .ok_or_else(|| self.fragment.error("No map key found"))?;
+
+            seed.deserialize(self.fragment.spawn(key)).map(Some)
+        } else {
+            Ok(None)
+        }
+    }
+
+    fn struct_key_seed<K>(&mut self, seed: K) -> Result<Option<K::Value>>
+    where
+        K: de::DeserializeSeed<'de>,
+    {
+        // If we end up emitting _contents, the whole remaining fragment goes
+        // there. This snapshot is taken before self.fragment is advanced so
+        // eg. comments that would otherwise eaten by comment_filter will
+        // still be included.
+        let mut contents_value = self.fragment.clone();
+
+        // Find next element from self.fragment, advancing the fragment value.
+        let next_element = self
+            .fragment
+            .find_map(Fragment::comment_filter)
+            .map(|f| self.fragment.spawn(f));
+
+        if let Some(next_element) = next_element {
+            // If next entry has a parseable but unexpected field, it'll go into
+            // attributes if attributes are being collected.
+            let attribute_element = next_element.clone();
+
+            if let Some((mut key, value)) = (*next_element).clone().split() {
+                if let Ok((mangled, _)) =
+                    parse::rust_attribute_name(&key.to_str())
+                {
+                    // We have a valid attribute.
+                    if self.contains_field(&mangled) {
+                        // It's also an expected field, proceed as normal.
+
+                        key.rewrite(mangled);
+                        self.value_fragment = Some(self.fragment.spawn(value));
+                        return seed
+                            .deserialize(self.fragment.spawn(key))
+                            .map(Some);
+                    } else if self.contains_field("_attributes") {
+                        // It's not expected, but we're collecting those to
+                        // _attributes.
+
+                        // Need to do some mangling to make the entry be
+                        // map entry like instead of a struct attribute entry
+                        // like
+                        let new_fragment =
+                            (*attribute_element).clone().decolonate()?;
+                        self.attributes_bin =
+                            self.attributes_bin.clone().join(new_fragment);
+                        // Collected the entry instead of emitting anything,
+                        // so just recursively call the method again.
+                        return self.struct_key_seed(seed);
+                    } else {
+                        // TODO: Support String types in error messages so we
+                        // can print the field name (mangled) here.
+                        return attribute_element.err("Unexpected field");
+                    }
+                }
+            }
+        }
+
+        // Attribute parsing fell through, we're out of the attribute block
+        // now.
+        //
+        // First we need to emit _attributes if there is one.
+        if !self.attributes_bin.is_empty() {
+            let mut key = self.fragment.clone();
+            key.rewrite("_attributes");
+            self.value_fragment =
+                Some(self.fragment.spawn(self.attributes_bin.clone()));
+
+            // Remember to zero the attributes bin so we skip this part the
+            // next time we come round.
+            self.attributes_bin = Default::default();
+            self.fragment = contents_value;
+
+            return seed.deserialize(key).map(Some);
+        }
+
+        // No attributes left, now is the time to emit _contents if have them
+        // and the struct wants them.
+        if !contents_value.is_empty() {
+            if self.contains_field("_contents") {
+                let mut key = contents_value.clone();
+                key.rewrite("_contents");
+
+                // The raw mode track can mess things up here, reset it.
+                contents_value.raw_mode_track = Default::default();
+
+                self.value_fragment = Some(contents_value);
+                self.fragment = Default::default();
+                return seed.deserialize(key).map(Some);
+            } else {
+                // There are non-attribute contents, but no _contents
+                // field to contain them, this is an error.
+
+                if contents_value
+                    .clone()
+                    .find_map(Fragment::comment_filter)
+                    .is_none()
+                {
+                    // Maybe it's just blanks and comments?
+                    return Ok(None);
+                } else {
+                    // Otherwise, nope, can't have that.
+                    return contents_value.err("Unhandled content in struct");
+                }
+            }
+        }
+
+        // Nothing more to do.
+        Ok(None)
     }
     // }}}
 }
@@ -492,45 +624,10 @@ impl<'de> de::MapAccess<'de> for Sequence<'de> {
     where
         K: de::DeserializeSeed<'de>,
     {
-        let fallback_for_contents = self.fragment.clone();
-        self.map_element = self
-            .fragment
-            .find_map(Fragment::comment_filter)
-            .map(|f| self.fragment.spawn(f));
-        if let Some(elt) = self.map_element.as_mut() {
-            let mut key = elt
-                .next()
-                .ok_or_else(|| self.fragment.error("No map key found"))?;
-            if self.struct_fields.is_some() {
-                if let Ok((mangled, _)) = parse::attribute_name(&*key.to_str())
-                {
-                    // Field must be expected.
-                    if !self.contains_field(&mangled) {
-                        // XXX: Support String messages, add field name to
-                        // message.
-                        return fallback_for_contents.err("Unexpected field");
-                    }
-                    // It's a struct, parse attribute names.
-                    key.rewrite(mangled);
-                } else if self.contains_field("_contents") {
-                    // Out of parseable names, but struct expects contents.
-                    key.rewrite("_contents");
-                    // Reset map_element to be the complete remaining element
-                    // (and remove this from fragment).
-                    self.map_element = Some(fallback_for_contents);
-                    self.fragment = self.fragment.spawn(Fragment::Empty);
-                } else {
-                    // There are non-attribute contents, but no _contents
-                    // field to contain them, this is an error.
-                    return fallback_for_contents
-                        .err("Unhandled content in struct");
-                }
-            }
-
-            seed.deserialize(self.fragment.spawn(key)).map(Some)
+        if self.struct_fields.is_some() {
+            self.struct_key_seed(seed)
         } else {
-            // TODO: Error if we're missing expected fields?
-            Ok(None)
+            self.map_key_seed(seed)
         }
     }
 
@@ -538,7 +635,7 @@ impl<'de> de::MapAccess<'de> for Sequence<'de> {
     where
         V: de::DeserializeSeed<'de>,
     {
-        if let Some(elt) = self.map_element.take() {
+        if let Some(elt) = self.value_fragment.take() {
             seed.deserialize(elt)
         } else {
             self.fragment.err("No map element for value")
