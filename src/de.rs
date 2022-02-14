@@ -1,38 +1,79 @@
-use std::{cell::RefCell, rc::Rc};
+use std::{cell::RefCell, rc::Rc, str::FromStr};
 
-use crate::{err, fragment::Fragment, parse, Error, Result};
+use crate::{fragment::Fragment, parse, Error, Result};
 use serde::de;
 
 pub fn from_str<'a, T>(input: &'a str) -> crate::Result<T>
 where
     T: de::Deserialize<'a>,
 {
-    let fragment = Deserializer::from(Fragment::new(input)?);
-    T::deserialize(fragment)
+    T::deserialize(Deserializer::from_str(input)?)
 }
 
 #[derive(Clone, Default, Debug)]
 struct Deserializer<'de> {
     inner: Fragment<'de>,
 
+    input: &'de str,
     raw_mode_track: Rc<RefCell<Option<Fragment<'de>>>>,
 }
 
 impl<'de> Deserializer<'de> {
-    fn checkpointed(
+    fn from_str(input: &'de str) -> Result<Self> {
+        let inner = Fragment::new(input)?;
+        Ok(Deserializer {
+            inner,
+            input,
+            ..Default::default()
+        })
+    }
+
+    fn spawn(&self, inner: Fragment<'de>) -> Self {
+        // Retain input reference.
+        let mut ret = self.clone();
+        ret.inner = inner;
+        ret.raw_mode_track = Default::default();
+        ret
+    }
+
+    fn spawn_checkpointed(
+        &self,
         inner: Fragment<'de>,
         raw_mode_track: Rc<RefCell<Option<Fragment<'de>>>>,
     ) -> Deserializer<'de> {
-        Deserializer {
-            inner,
-            raw_mode_track,
-        }
+        let mut ret = self.spawn(inner);
+        ret.raw_mode_track = raw_mode_track;
+        ret
     }
 
     fn restore(&mut self) {
         if let Some(t) = self.raw_mode_track.borrow_mut().take() {
             self.inner = t;
         }
+    }
+
+    fn error(&self, msg: &'static str) -> Error {
+        let error = Error::new(msg);
+        if let Some(s) = self.inner.str_slice() {
+            error.infer_line_num(self.input, s)
+        } else {
+            error
+        }
+    }
+
+    fn err<T>(&self, msg: &'static str) -> Result<T> {
+        Err(self.error(msg))
+    }
+
+    pub fn parse<T: FromStr>(&self) -> Result<T> {
+        let s = self.inner.to_str();
+        s.trim_end().parse().map_err(|_| {
+            let mut e = Error::new("Failed to parse value");
+            if let Some(s) = self.inner.str_slice() {
+                e = e.infer_line_num(self.input, s);
+            }
+            e
+        })
     }
 }
 
@@ -47,15 +88,6 @@ impl<'de> std::ops::Deref for Deserializer<'de> {
 impl<'de> std::ops::DerefMut for Deserializer<'de> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.inner
-    }
-}
-
-impl<'de> From<Fragment<'de>> for Deserializer<'de> {
-    fn from(inner: Fragment<'de>) -> Self {
-        Deserializer {
-            inner,
-            ..Default::default()
-        }
     }
 }
 
@@ -427,10 +459,10 @@ impl<'de> de::SeqAccess<'de> for Sequence<'de> {
 
         self.idx += 1;
         let ret = seed
-            .deserialize(Deserializer::checkpointed(
-                fragment,
-                raw_mode_track_cell.clone(),
-            ))
+            .deserialize(
+                self.fragment
+                    .spawn_checkpointed(fragment, raw_mode_track_cell.clone()),
+            )
             .map(Some);
 
         if raw_mode_track_cell.borrow().is_none() {
@@ -439,12 +471,12 @@ impl<'de> de::SeqAccess<'de> for Sequence<'de> {
 
             // Split using raw mode logic.
             if let Some((_, tail)) = sequence_checkpoint.split_raw() {
-                self.fragment = tail.into();
+                self.fragment = self.fragment.spawn(tail);
             } else {
-                self.fragment = Fragment::Empty.into();
+                self.fragment = self.fragment.spawn(Fragment::Empty);
             }
         } else {
-            self.fragment = next_fragment.into();
+            self.fragment = self.fragment.spawn(next_fragment);
         }
 
         ret
@@ -464,16 +496,19 @@ impl<'de> de::MapAccess<'de> for Sequence<'de> {
         self.map_element = self
             .fragment
             .find_map(Fragment::comment_filter)
-            .map(Into::into);
+            .map(|f| self.fragment.spawn(f));
         if let Some(elt) = self.map_element.as_mut() {
-            let mut key =
-                elt.next().ok_or_else(|| Error::new("No map key found"))?;
+            let mut key = elt
+                .next()
+                .ok_or_else(|| self.fragment.error("No map key found"))?;
             if self.struct_fields.is_some() {
                 if let Ok((mangled, _)) = parse::attribute_name(&*key.to_str())
                 {
                     // Field must be expected.
                     if !self.contains_field(&mangled) {
-                        return err!("Unexpected field {mangled}");
+                        // XXX: Support String messages, add field name to
+                        // message.
+                        return fallback_for_contents.err("Unexpected field");
                     }
                     // It's a struct, parse attribute names.
                     key.rewrite(mangled);
@@ -483,15 +518,16 @@ impl<'de> de::MapAccess<'de> for Sequence<'de> {
                     // Reset map_element to be the complete remaining element
                     // (and remove this from fragment).
                     self.map_element = Some(fallback_for_contents);
-                    self.fragment = Fragment::Empty.into();
+                    self.fragment = self.fragment.spawn(Fragment::Empty);
                 } else {
                     // There are non-attribute contents, but no _contents
                     // field to contain them, this is an error.
-                    return err!("Unhandled content in struct");
+                    return fallback_for_contents
+                        .err("Unhandled content in struct");
                 }
             }
 
-            seed.deserialize(Deserializer::from(key)).map(Some)
+            seed.deserialize(self.fragment.spawn(key)).map(Some)
         } else {
             // TODO: Error if we're missing expected fields?
             Ok(None)
@@ -505,7 +541,7 @@ impl<'de> de::MapAccess<'de> for Sequence<'de> {
         if let Some(elt) = self.map_element.take() {
             seed.deserialize(elt)
         } else {
-            err!("No map element for value")
+            self.fragment.err("No map element for value")
         }
     }
     // }}}

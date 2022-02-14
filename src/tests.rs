@@ -24,6 +24,14 @@ macro_rules! test {
     };
 }
 
+fn fails_at<T: serde::de::DeserializeOwned>(line_num: usize, idm: &str) {
+    if let Err(e) = from_str::<T>(idm) {
+        assert_eq!(e.line_num(), Some(line_num));
+    } else {
+        panic!("Bad input didn't cause parse error");
+    }
+}
+
 #[test]
 fn atom() {
     test!(&123u32, "123");
@@ -52,6 +60,34 @@ fn primitives() {
 }
 
 #[test]
+fn inconsistent_indentation() {
+    fails_at::<Outline>(
+        3,
+        "\
+foo
+  bar
+\tbaz",
+    );
+
+    fails_at::<Outline>(
+        3,
+        "\
+foo
+  bar
+  \tbaz",
+    );
+
+    // TODO:
+    /*
+        fails_at::<Outline>(4, "\
+    foo
+      bar
+    qux
+    \tquux");
+    */
+}
+
+#[test]
 fn simple_sequence() {
     // Test inline fragments.
     test!(
@@ -71,6 +107,8 @@ fn simple_sequence() {
 A
   2"
     );
+
+    fails_at::<(i32, i32, i32)>(1, "1 2 3 4");
 }
 
 #[test]
@@ -498,24 +536,24 @@ y: 2
     );
 
     // Must fail if there's no _contents field to grab contents
-    assert!(from_str::<Simple>(
+    fails_at::<Simple>(
+        4,
         "\
 name-text: Foo bar
 x: 1
 y: 2
-chaff"
-    )
-    .is_err());
+chaff",
+    );
 
     // Must fail if a field can't be handled.
-    assert!(from_str::<Simple>(
+    fails_at::<Simple>(
+        4,
         "\
 name_text: a
 x: 1
 y: 2
-unexpected: stuff"
+unexpected: stuff",
     )
-    .is_err());
 }
 
 #[test]

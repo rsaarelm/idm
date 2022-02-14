@@ -55,13 +55,39 @@ impl Error {
         }
     }
 
-    pub fn line_num(mut self, line_num: usize) -> Error {
+    pub fn line_num(&self) -> Option<usize> {
+        self.line_num
+    }
+
+    pub fn file_name(&self) -> Option<&str> {
+        self.file_name.as_ref().map(|s| s.as_str())
+    }
+
+    pub fn with_line_num(mut self, line_num: usize) -> Error {
         self.line_num = Some(line_num);
         self
     }
 
-    pub fn file_name(mut self, file_name: String) -> Error {
+    pub fn with_file_name(mut self, file_name: String) -> Error {
         self.file_name = Some(file_name);
+        self
+    }
+
+    pub(crate) fn infer_line_num(
+        mut self,
+        input: &str,
+        error_slice: &str,
+    ) -> Error {
+        // hax
+        if let Some(input_so_far) = input.get(
+            0..unsafe {
+                error_slice.as_ptr().offset_from(input.as_ptr()) as usize
+            },
+        ) {
+            self.line_num =
+                Some(1 + input_so_far.chars().filter(|&c| c == '\n').count())
+        }
+
         self
     }
 }

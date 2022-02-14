@@ -1,7 +1,6 @@
-use std::{borrow::Cow, fmt, rc::Rc, str::FromStr};
+use std::{borrow::Cow, fmt, rc::Rc};
 
 use crate::{
-    err,
     parse::{self, CharExt, Indent},
     Error, Result,
 };
@@ -49,27 +48,35 @@ impl<'a> Fragment<'a> {
             .next()
             .map_or(false, |c| c.is_idm_whitespace())
         {
-            Err(Error::new("Unexpected indentation").line_num(1))
+            Err(Error::new("Unexpected indentation").with_line_num(1))
         } else if input.chars().all(CharExt::is_idm_whitespace) {
             Ok(Empty)
         } else if !input.chars().any(|c| c == '\n') {
             Ok(Line(input))
         } else {
-            Ok(Fragment::parse_block(Indent::default(), input)?.0)
+            Ok(Fragment::parse_block(input, Indent::default(), input)?.0)
         }
     }
 
     fn parse_block(
+        input_start: &'a str,
         expected_indent: Indent,
         input: &'a str,
     ) -> Result<(Fragment<'a>, &'a str)> {
-        let (indent, _) = parse::indent(input)
-            .map_err(|_| Error::new("Inconsistent indentation"))?;
+        let err = |msg: &'static str| {
+            move |e: &str| Error::new(msg).infer_line_num(input_start, e)
+        };
+        let indent_err = |e| {
+            Error::new("Inconsistent indentation")
+                .infer_line_num(input_start, e)
+        };
+
+        let (indent, _) = parse::indent(input).map_err(indent_err)?;
         if indent != expected_indent {
-            return err!("Unexpected indentation");
+            return Err(input).map_err(indent_err);
         }
 
-        let (line, rest) = parse::line(input)?;
+        let (line, rest) = parse::line(input).map_err(err("Line error"))?;
 
         // Strip indentation when putting it in headline.
         // Must always have at least one headline when parsing a block.
@@ -82,18 +89,19 @@ impl<'a> Fragment<'a> {
         let head = Line(line);
 
         // Does the initial section have body lines?
-        let (mut next_indent, _) = parse::indent(rest)?;
+        let (mut next_indent, _) = parse::indent(rest).map_err(indent_err)?;
         if !next_indent.compatible_with(expected_indent) {
-            return err!("Inconsistent indentation");
+            return Err(rest).map_err(indent_err);
         }
         let (first, rest) = if next_indent.len() > expected_indent.len() {
             // Yep, hit a deeper level of indent.
             // Recursively parse child blocks.
-            let (body, rest) = Fragment::parse_block(next_indent, rest)?;
+            let (body, rest) =
+                Fragment::parse_block(input_start, next_indent, rest)?;
             let body_indent = next_indent - expected_indent;
 
             // Recompute indent after reading body blocks.
-            next_indent = parse::indent(rest)?.0;
+            next_indent = parse::indent(rest).map_err(indent_err)?.0;
 
             (
                 Rc::new(Section {
@@ -111,7 +119,8 @@ impl<'a> Fragment<'a> {
         let (next, rest) =
             if !rest.is_empty() && next_indent.len() == expected_indent.len() {
                 // There's a sibling block, parse that.
-                let (block, rest) = Fragment::parse_block(next_indent, rest)?;
+                let (block, rest) =
+                    Fragment::parse_block(input_start, next_indent, rest)?;
                 (Rc::new(block), rest)
             } else {
                 (Rc::new(Empty), rest)
@@ -176,7 +185,7 @@ impl<'a> Fragment<'a> {
         }
     }
 
-    fn str_slice(&self) -> Option<&'a str> {
+    pub fn str_slice(&self) -> Option<&'a str> {
         match self {
             Empty => None,
             Line(s) => Some(s),
@@ -187,20 +196,6 @@ impl<'a> Fragment<'a> {
             Phrase(s) => Some(s),
             ConstName { input_pos, .. } => Some(input_pos),
         }
-    }
-
-    pub fn line_number(&self, full_input: &'a str) -> usize {
-        if let Some(s) = self.str_slice() {
-            // hax
-            if let Some(input_so_far) = full_input.get(
-                0..unsafe {
-                    s.as_ptr().offset_from(full_input.as_ptr()) as usize
-                },
-            ) {
-                return 1 + input_so_far.chars().filter(|&c| c == '\n').count();
-            }
-        }
-        0
     }
 
     pub fn is_blank(&self) -> bool {
@@ -231,13 +226,6 @@ impl<'a> Fragment<'a> {
             }
             a => Some(a.clone()),
         }
-    }
-
-    pub fn parse<T: FromStr>(&self) -> Result<T> {
-        let s = self.to_str();
-        s.trim_end()
-            .parse()
-            .map_err(|_| Error::new("Failed to parse value"))
     }
 
     pub fn rewrite(&mut self, text: impl Into<String>) {
