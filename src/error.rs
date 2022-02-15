@@ -60,7 +60,7 @@ impl Error {
     }
 
     pub fn file_name(&self) -> Option<&str> {
-        self.file_name.as_ref().map(|s| s.as_str())
+        self.file_name.as_deref()
     }
 
     pub fn with_line_num(mut self, line_num: usize) -> Error {
