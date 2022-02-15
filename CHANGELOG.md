@@ -15,15 +15,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.2.0] - 2021-09-09
 ### Changes
-- Support either tabs or spaces for indentation
 - Do not support empty headlines
 - Raw mode is now indicated by byte buffer type instead of `Option`
-- Comman syntax is removed, comments are now used as structural separators
+- Comma separator syntax is removed, comments are now used as structural separators
 ### Fixes
 - Section-like pair tuples are parsed correctly
 ### Additions
 - Comment syntax
 - Error reporting with line numbers
+- Spaces are also supported for indentation
 
 ## [0.1.0] - 2021-04-10
 Initial release
