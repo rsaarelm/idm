@@ -245,6 +245,10 @@ impl<'a> Fragment<'a> {
         !matches!(self, Block { .. } | Section { .. } | Empty)
     }
 
+    pub fn is_phrase(&self) -> bool {
+        matches!(self, Phrase(_))
+    }
+
     pub fn is_empty(&self) -> bool {
         matches!(self, Empty)
     }

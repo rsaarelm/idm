@@ -1051,7 +1051,21 @@ Alpha Centauri
     mass: 0.08
   Chiron
     orbit: 1.32
-    mass: 1.33"
+    mass: 1.33",
+        // Nice and compact inline structs.
+        "\
+Sol
+  age: 4.6e9
+  mass: 1.0
+  Mercury  0.39  0.055
+  Venus    0.72  0.815
+  Earth    1.0   1.0
+  Mars     1.52  0.1
+Alpha Centauri
+  age: 5.3e9
+  mass: 1.1
+  Eurytion  0.47  0.08
+  Chiron    1.32  1.33"
     );
 }
 

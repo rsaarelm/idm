@@ -320,7 +320,15 @@ impl<'de> de::Deserializer<'de> for Deserializer<'de> {
     where
         V: de::Visitor<'de>,
     {
-        visitor.visit_map(Sequence::new(self).as_struct(fields))
+        let inline_mode = self.is_inline()
+            && fields
+                .iter()
+                .find(|&&c| c == "_attributes" || c == "_contents")
+                .is_none();
+        let mut seq = Sequence::new(self).as_struct(fields);
+        seq.inline_mode = inline_mode;
+
+        visitor.visit_map(seq)
     }
 
     fn deserialize_enum<V>(
@@ -346,6 +354,7 @@ struct Sequence<'de> {
     value_fragment: Option<Deserializer<'de>>,
     /// Extra code for generic attributes is created here, then serialized.
     attributes_bin: Fragment<'de>,
+    inline_mode: bool,
 }
 
 impl<'de> Sequence<'de> {
@@ -358,6 +367,7 @@ impl<'de> Sequence<'de> {
             struct_fields: None,
             value_fragment: None,
             attributes_bin: Fragment::Empty,
+            inline_mode: false,
         }
     }
 
@@ -394,7 +404,11 @@ impl<'de> Sequence<'de> {
         }
     }
 
-    fn struct_key_seed<K>(&mut self, seed: K) -> Result<Option<K::Value>>
+    fn struct_key_seed<K>(
+        &mut self,
+        seed: K,
+        fields: &'static [&'static str],
+    ) -> Result<Option<K::Value>>
     where
         K: de::DeserializeSeed<'de>,
     {
@@ -414,6 +428,18 @@ impl<'de> Sequence<'de> {
             // If next entry has a parseable but unexpected field, it'll go into
             // attributes if attributes are being collected.
             let attribute_element = next_element.clone();
+
+            if next_element.is_phrase() && self.inline_mode {
+                if self.idx >= fields.len() {
+                    return self
+                        .fragment
+                        .err("Unhandled content in inline struct");
+                }
+                let mut key = next_element.clone();
+                key.rewrite(fields[self.idx]);
+                self.value_fragment = Some(next_element);
+                return seed.deserialize(key).map(Some);
+            }
 
             if let Some((mut key, value)) = (*next_element).clone().split() {
                 if let Ok((mangled, _)) =
@@ -441,7 +467,7 @@ impl<'de> Sequence<'de> {
                             self.attributes_bin.clone().join(new_fragment);
                         // Collected the entry instead of emitting anything,
                         // so just recursively call the method again.
-                        return self.struct_key_seed(seed);
+                        return self.struct_key_seed(seed, fields);
                     } else {
                         // TODO: Support String types in error messages so we
                         // can print the field name (mangled) here.
@@ -624,8 +650,8 @@ impl<'de> de::MapAccess<'de> for Sequence<'de> {
     where
         K: de::DeserializeSeed<'de>,
     {
-        if self.struct_fields.is_some() {
-            self.struct_key_seed(seed)
+        if let Some(fields) = self.struct_fields {
+            self.struct_key_seed(seed, fields)
         } else {
             self.map_key_seed(seed)
         }
@@ -636,6 +662,7 @@ impl<'de> de::MapAccess<'de> for Sequence<'de> {
         V: de::DeserializeSeed<'de>,
     {
         if let Some(elt) = self.value_fragment.take() {
+            self.idx += 1;
             seed.deserialize(elt)
         } else {
             self.fragment.err("No map element for value")
