@@ -8,7 +8,6 @@ description = "Implicit Data Markup"
 categories = ["encoding"]
 
 [dependencies]
-paste = "1"
 serde = { version = "1", features = ["derive"] }
 serde_bytes = "0.11"
 

@@ -6,7 +6,7 @@ in
 pkgs.mkShell {
   buildInputs = with pkgs; [
     rustc cargo rustfmt rust-analyzer
-    cargo-outdated cargo-tarpaulin cargo-flamegraph cargo-watch clippy
+    cargo-outdated cargo-tarpaulin clippy
 
     # Utils
     just linuxPackages.perf
