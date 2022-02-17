@@ -28,7 +28,7 @@ fn main() {
     let reser = idm::to_string_styled_like(&buffer, &outline)
         .expect("Reserialization failed");
 
-    println!("{:?}", outline);
+    print!("{}", reser);
 
     if buffer != reser {
         std::process::exit(1);
