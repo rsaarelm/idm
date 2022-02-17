@@ -13,6 +13,11 @@ pub enum Fragment<'a> {
     Empty,
     /// A single (non-empty) line.
     Line(&'a str),
+    // XXX: DecolonLine is an ugly hack caused by Fragment contents not being
+    // Cows that can be rewritten with dynamic values.
+    /// A line that gets formatted to not show attribute colon.
+    /// Used when deserializing an attribute fragment into an `_attributes`
+    /// value.
     DecolonLine(&'a str),
     /// A section with a (non-empty) indented body.
     ///

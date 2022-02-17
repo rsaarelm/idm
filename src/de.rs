@@ -1,6 +1,10 @@
-use std::{cell::RefCell, rc::Rc, str::FromStr};
+use std::{cell::RefCell, collections::HashSet, rc::Rc, str::FromStr};
 
-use crate::{fragment::Fragment, parse, Error, Result};
+use crate::{
+    fragment::Fragment,
+    parse::{self, CharExt},
+    Error, Result,
+};
 use serde::de;
 
 pub fn from_str<'a, T>(input: &'a str) -> crate::Result<T>
@@ -354,6 +358,7 @@ struct Sequence<'de> {
     value_fragment: Option<Deserializer<'de>>,
     /// Extra code for generic attributes is created here, then serialized.
     attributes_bin: Fragment<'de>,
+    attributes_seen: HashSet<String>,
     inline_mode: bool,
 }
 
@@ -367,6 +372,7 @@ impl<'de> Sequence<'de> {
             struct_fields: None,
             value_fragment: None,
             attributes_bin: Fragment::Empty,
+            attributes_seen: Default::default(),
             inline_mode: false,
         }
     }
@@ -442,9 +448,24 @@ impl<'de> Sequence<'de> {
             }
 
             if let Some((mut key, value)) = (*next_element).clone().split() {
-                if let Ok((mangled, _)) =
+                if let Ok((mangled, rest)) =
                     parse::rust_attribute_name(&key.to_str())
                 {
+                    // Section-like value with attribute, eg.
+                    //
+                    // a: 1
+                    //   2
+                    //
+                    // It must be either fully inline or fully outline.
+                    if rest.chars().any(|c| !c.is_idm_whitespace()) {
+                        return contents_value
+                            .err("Invalid attribute value shape");
+                    }
+
+                    if value.is_empty() {
+                        return contents_value.err("No value for struct field");
+                    }
+
                     // We have a valid attribute.
                     if self.contains_field(&mangled) {
                         // It's also an expected field, proceed as normal.
@@ -455,6 +476,12 @@ impl<'de> Sequence<'de> {
                             .deserialize(self.fragment.spawn(key))
                             .map(Some);
                     } else if self.contains_field("_attributes") {
+                        // Check that the same attribute isn't being repeated.
+                        if self.attributes_seen.contains(&mangled) {
+                            return contents_value.err("Repeated attribute");
+                        }
+                        self.attributes_seen.insert(mangled);
+
                         // It's not expected, but we're collecting those to
                         // _attributes.
 

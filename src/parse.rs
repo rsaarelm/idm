@@ -25,18 +25,40 @@ pub fn word(input: &str) -> Result<&str> {
     }
 }
 
-pub fn rust_attribute_name(input: &str) -> Result<String> {
+pub fn attribute_name(input: &str) -> Result<&str> {
     let (word, rest) = word(input)?;
 
-    // Convert from IDM's kebab-case to Rust's camel_case.
-    let mut word = word.replace("-", "_");
-
-    if !word.ends_with(':') || word == ":" {
+    // basically a regex but I don't want to import regex crate for just this
+    // one thing...
+    // "^[a-z][a-z0-9-]*:$"
+    if word.len() < 2 {
         return Err(input);
     }
+    for (i, c) in word.chars().enumerate() {
+        if i == 0 {
+            if !c.is_ascii_lowercase() {
+                return Err(input);
+            }
+        } else if i == word.len() - 1 {
+            if c != ':' {
+                return Err(input);
+            }
+        } else {
+            if c != '-' && !c.is_ascii_lowercase() && !c.is_ascii_digit() {
+                return Err(input);
+            }
+        }
+    }
 
-    // Remove the trailing :
-    word.pop();
+    // Return the name without the trailing colon.
+    Ok((&word[0..word.len() - 1], rest))
+}
+
+pub fn rust_attribute_name(input: &str) -> Result<String> {
+    let (word, rest) = attribute_name(input)?;
+
+    // Convert from IDM's kebab-case to Rust's camel_case.
+    let word = word.replace("-", "_");
 
     Ok((word, rest))
 }

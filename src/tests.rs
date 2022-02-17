@@ -24,11 +24,13 @@ macro_rules! test {
     };
 }
 
-fn fails_at<T: serde::de::DeserializeOwned>(line_num: usize, idm: &str) {
-    if let Err(e) = from_str::<T>(idm) {
-        assert_eq!(e.line_num(), Some(line_num));
-    } else {
-        panic!("Bad input didn't cause parse error");
+fn fails_at<T: serde::de::DeserializeOwned + fmt::Debug>(
+    line_num: usize,
+    idm: &str,
+) {
+    match from_str::<T>(idm) {
+        Err(e) => assert_eq!(e.line_num(), Some(line_num)),
+        Ok(val) => panic!("Bad input parsed into '{:?}'", val),
     }
 }
 
@@ -549,11 +551,21 @@ chaff",
     fails_at::<Simple>(
         4,
         "\
-name_text: a
+name-text: a
 x: 1
 y: 2
 unexpected: stuff",
-    )
+    );
+
+    // Values must not have both inline and outline component.
+    fails_at::<Simple>(
+        1,
+        "\
+name-text: a
+  b
+x: 1
+y: 2",
+    );
 }
 
 #[test]
@@ -1191,16 +1203,16 @@ xyzzy: 5"
     );
 }
 
-#[test]
-fn test_attribute_outline_1() {
-    #[derive(PartialEq, Default, Debug, Serialize, Deserialize)]
-    struct AnyStruct {
-        #[serde(default)]
-        _attributes: Vec<(String, String)>,
-        #[serde(default)]
-        _contents: Vec<(Raw<String>, AnyStruct)>,
-    }
+#[derive(PartialEq, Default, Debug, Serialize, Deserialize)]
+struct AnyStruct {
+    #[serde(default)]
+    _attributes: BTreeMap<String, String>,
+    #[serde(default)]
+    _contents: Vec<(Raw<String>, AnyStruct)>,
+}
 
+#[test]
+fn test_attribute_outline() {
     test!(&AnyStruct::default(), "");
 
     test!(
@@ -1216,7 +1228,9 @@ fn test_attribute_outline_1() {
             _contents: vec![(
                 Raw(s("Title")),
                 AnyStruct {
-                    _attributes: vec![(s("attr"), s("123"))],
+                    _attributes: vec![(s("attr"), s("123"))]
+                        .into_iter()
+                        .collect(),
                     _contents: vec![(Raw(s("Subpage")), AnyStruct::default())]
                 }
             )],
@@ -1231,16 +1245,8 @@ Title
 
 #[test]
 fn test_attribute_outline_2() {
-    // StructOutline first version, not the idiomatic way.
-    // Gives different errors though.
-    #[derive(PartialEq, Default, Debug, Serialize, Deserialize)]
-    struct AnyStruct {
-        #[serde(default)]
-        _attributes: Vec<(String, String)>,
-        #[serde(default)]
-        _contents: StructOutline,
-    }
-
+    // Non-idiomatic way that starts with a StructOutline.
+    // Has different failure modes, so keeping it as a test.
     type StructOutline = Vec<(Raw<String>, AnyStruct)>;
 
     test!(&StructOutline::default(), "");
@@ -1251,7 +1257,7 @@ fn test_attribute_outline_2() {
         &vec![(
             Raw(s("Title")),
             AnyStruct {
-                _attributes: vec![(s("attr"), s("123"))],
+                _attributes: vec![(s("attr"), s("123"))].into_iter().collect(),
                 _contents: vec![(Raw(s("Subpage")), AnyStruct::default())]
             }
         )],
@@ -1259,6 +1265,92 @@ fn test_attribute_outline_2() {
 Title
   attr: 123
   Subpage"
+    );
+}
+
+#[test]
+fn attribute_errors() {
+    fails_at::<AnyStruct>(
+        3,
+        "\
+a1: 1
+a2: 2
+bad-attr: Can't have stuff both here
+  and here
+Content",
+    );
+}
+
+#[test]
+fn allowed_attributes() {
+    #[derive(PartialEq, Default, Debug, Serialize, Deserialize)]
+    struct AttrBag {
+        #[serde(default)]
+        _attributes: Vec<(String, String)>,
+    }
+
+    // Test that the basic stuff works.
+    test!(
+        &AttrBag {
+            _attributes: vec![(s("foo"), s("bar"))]
+        },
+        "foo: bar\n"
+    );
+    // Outline form must make a difference.
+    test!(
+        &AttrBag {
+            _attributes: vec![(s("foo"), s("bar\nbaz"))]
+        },
+        "\
+foo:
+  bar
+  baz"
+    );
+    // Hyphens inside the attribute are fine.
+    test!(
+        &AttrBag {
+            _attributes: vec![(s("xyz-zy"), s("2"))]
+        },
+        "xyz-zy: 2\n"
+    );
+    // Numbers after start are fine
+    test!(
+        &AttrBag {
+            _attributes: vec![(s("bfg9000"), s("666"))]
+        },
+        "bfg9000: 666\n"
+    );
+
+    // Collection of the various syntax problems with attributes.
+    fails_at::<AttrBag>(1, "no-colon 1\n");
+    fails_at::<AttrBag>(1, "spaced out: 1\n");
+    fails_at::<AttrBag>(1, "nbspd\u{00A0}out: 1\n");
+    fails_at::<AttrBag>(1, "0numberstart: 1\n");
+    fails_at::<AttrBag>(1, "-hyphenstart: 1\n");
+    fails_at::<AttrBag>(1, "under_lined: 1\n");
+    fails_at::<AttrBag>(1, "uɴіϲοԁе-ѡаѕ-а-ⅿⅰstακe: 1\n");
+    fails_at::<AttrBag>(1, "Capitalized: 1\n");
+    fails_at::<AttrBag>(1, "cameLized: 1\n");
+    fails_at::<AttrBag>(1, "extra-colon:: 1\n");
+    fails_at::<AttrBag>(1, ":: 1\n");
+    fails_at::<AttrBag>(1, "punct.uation: 1\n");
+
+    // Also check structural problems.
+    // Must have a value.
+    fails_at::<AttrBag>(1, "no-value:\n");
+    // Must be inline or outline, not both.
+    fails_at::<AttrBag>(
+        1,
+        "\
+mixed-form: 1
+  2",
+    );
+    // Attributes must be unique.
+    fails_at::<AttrBag>(
+        2,
+        "\
+repeat: 1
+repeat: 2",
     );
 }
 
@@ -1270,6 +1362,8 @@ fn test<T>(val: &T, idm: &str)
 where
     T: PartialEq + fmt::Debug + serde::Serialize + serde::de::DeserializeOwned,
 {
+    let is_inline = !idm.chars().any(|c| c == '\n');
+
     let deser = from_str::<T>(idm).expect("IDM did not deserialize to type");
     assert_eq!(&deser, val);
 
@@ -1291,7 +1385,11 @@ where
     // Also check for default style ser, two characters per indent can trip
     // some deserialization bugs that generate 1-character dummy indents where
     // they shouldn't.
-    let reser = to_string(val).expect("Value did not serialize to IDM");
+    let mut reser = to_string(val).expect("Value did not serialize to IDM");
+    if is_inline {
+        reser = reser.trim_end().to_string();
+    }
+
     let new_deser = from_str::<T>(&reser)
         .expect("Serialized IDM did not deserialize to type");
     assert_eq!(&new_deser, val);
