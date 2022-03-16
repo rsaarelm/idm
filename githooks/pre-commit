@@ -1,6 +1,5 @@
 #!/usr/bin/env sh
 
-# Do unit tests before pushing
+# Don't allow unformatted commits
 set -e
 cargo fmt --all -- --check
-cargo test --all
