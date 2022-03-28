@@ -194,6 +194,9 @@ impl std::ops::Add for Indent {
 
     fn add(self, rhs: Self) -> Self::Output {
         match (self, rhs) {
+            (Indent::Undetermined, Indent::Undetermined) => {
+                Indent::Undetermined
+            }
             (Indent::Undetermined, Indent::Spaces(a)) => Indent::Spaces(a),
             (Indent::Spaces(a), Indent::Undetermined) => Indent::Spaces(a),
             (Indent::Undetermined, Indent::Tabs(a)) => Indent::Tabs(a),
@@ -211,6 +214,9 @@ impl std::ops::Sub for Indent {
 
     fn sub(self, rhs: Self) -> Self::Output {
         match (self, rhs) {
+            (Indent::Undetermined, Indent::Undetermined) => {
+                Indent::Undetermined
+            }
             (Indent::Spaces(a), Indent::Undetermined) => Indent::Spaces(a),
             (Indent::Tabs(a), Indent::Undetermined) => Indent::Tabs(a),
 
