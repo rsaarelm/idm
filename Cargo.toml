@@ -12,6 +12,10 @@ serde = { version = "1", features = ["derive"] }
 take_mut = "0.2"
 
 [dev-dependencies]
+chrono = "0.4"
+clap = { version = "3", features = ["derive"] }
 indexmap = { version = "1", features = ["serde"] }
 lazy_static = "1"
 pretty_assertions = "1"
+rouille = "3"
+slug = "0.1"

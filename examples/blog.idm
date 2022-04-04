@@ -1,0 +1,18 @@
+:author A. Non
+:title Test Blog, Please Ignore
+First post
+	:published 2022-03-01
+	:tags stuff
+	Hello world, this is a blog.
+	Newlines get clumped together.
+
+	Empty lines will cause split into paragraphs.
+Look at the cool link
+	:published 2022-03-04
+	Another post.
+
+	We should have some links.
+		:href https://example.com/
+That one time when I came up with this really convoluted and annoying title that would make for a crappy URL so I wanted to be able to override the slug.
+	:published 2022-03-05
+	:slug title-redacted
