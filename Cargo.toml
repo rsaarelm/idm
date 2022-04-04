@@ -9,7 +9,9 @@ categories = ["encoding"]
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
-serde_bytes = "0.11"
+take_mut = "0.2"
 
 [dev-dependencies]
+indexmap = { version = "1", features = ["serde"] }
+lazy_static = "1"
 pretty_assertions = "1"

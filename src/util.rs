@@ -1,4 +1,5 @@
 use crate::Style;
+use serde::{de::DeserializeOwned, Serialize};
 
 /// Like `guess_indent_style`, but returns `None` if input does not clearly
 /// specify an indent style.
@@ -40,6 +41,13 @@ pub fn infer_indent_style(input: &str) -> Option<Style> {
 /// Can be passed to the serializer to reserialize data in the same style.
 pub fn guess_indent_style(input: &str) -> Style {
     infer_indent_style(input).unwrap_or_default()
+}
+
+/// Try to convert a value of one type into a value of a different type that
+/// has the same IDM serialization.
+pub fn transmute<T: Serialize, U: DeserializeOwned>(e: &T) -> crate::Result<U> {
+    let s = crate::to_string(e)?;
+    crate::from_str(&s)
 }
 
 #[cfg(test)]

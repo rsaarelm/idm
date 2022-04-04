@@ -1,13 +1,12 @@
+use std::{collections::BTreeMap, fmt, iter::FromIterator};
+
 use crate::{
-    from_str, outline,
-    outline::{Outline, Raw},
-    to_string, to_string_styled_like,
+    from_str, outline, outline::Outline, to_string, to_string_styled_like,
 };
+use indexmap::IndexMap;
+use lazy_static::lazy_static;
 use pretty_assertions::assert_eq;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
-use std::fmt;
-use std::iter::FromIterator;
 
 macro_rules! test {
     ($val:expr, $canon:expr) => {
@@ -24,6 +23,14 @@ macro_rules! test {
     };
 }
 
+fn fails<T: serde::de::DeserializeOwned + fmt::Debug>(idm: &str) {
+    if let Ok(val) = from_str::<T>(idm) {
+        panic!("Bad input parsed into '{:?}'", val);
+    }
+}
+
+// FIXME: Re-enable error line numbers.
+/*
 fn fails_at<T: serde::de::DeserializeOwned + fmt::Debug>(
     line_num: usize,
     idm: &str,
@@ -33,6 +40,7 @@ fn fails_at<T: serde::de::DeserializeOwned + fmt::Debug>(
         Ok(val) => panic!("Bad input parsed into '{:?}'", val),
     }
 }
+*/
 
 #[test]
 fn atom() {
@@ -63,30 +71,28 @@ fn primitives() {
 
 #[test]
 fn inconsistent_indentation() {
-    fails_at::<Outline>(
-        3,
+    // FIXME: Re-enable line numbers in error reports.
+    fails /*_at*/::<Outline>(
+        //3,
         "\
 foo
   bar
 \tbaz",
     );
 
-    fails_at::<Outline>(
-        3,
+    fails /*_at*/::<Outline>(
+        //1,
         "\
 foo
   bar
   \tbaz",
     );
 
-    // TODO:
-    /*
-        fails_at::<Outline>(4, "\
-    foo
-      bar
-    qux
-    \tquux");
-    */
+    // TODO: Detect mixed indentation even when you dip into zero indentation
+    // in between. Not critical, since everything will work consistently even
+    // without this, but it's still something I feel like should be
+    // disallowed.
+    // fails_at::<Outline>(4, "foo\n  bar\nqux\n\tquux");
 }
 
 #[test]
@@ -98,19 +104,6 @@ fn simple_sequence() {
         "foo bar baz"
     );
     test!(&vec![1, 2, 3], "1\n2\n3", "1 2 3");
-    test!(&(1, 2, 3), "1\n2\n3");
-
-    test!(&vec![(Some(s("A")), 2)], "A 2\n");
-
-    // Raw forces section when you could be inlined otherwise.
-    test!(
-        &vec![(Raw(s("A")), 2)],
-        "\
-A
-  2"
-    );
-
-    fails_at::<(i32, i32, i32)>(1, "1 2 3 4");
 }
 
 #[test]
@@ -179,45 +172,11 @@ fn nested_sequence() {
 3 4",
         "\
 --
-\t1
-\t2
---
-\t3
-\t4",
-        "\
---
   1
   2
--- Here is a multiline comment
--- Multiple comment lines with no content in between
---
--- Even if they're empty
--- Don't mean an empty sequence exists in between them
 --
   3
-  4"
-    );
-
-    // NB. Tuples are pretty happy to opportunistically switch to section
-    // mode, so they're not viable for the rows level.
-
-    // Array case (tuple)
-    test!(
-        &vec![[1, 2], [3, 4]],
-        "\
-1 2
-3 4",
-        "\
-1 2
-
-3 4",
-        "\
---
-\t1
-\t2
---
-\t3
-\t4",
+  4",
         "\
 --
   1
@@ -238,17 +197,6 @@ fn multi_nesting() {
     // Outline list of matrices.
     test!(
         &vec![vec![vec![1, 2], vec![3, 4]], vec![vec![5, 6], vec![7, 8]]],
-        "\
---
-  1 2
-  3 4
---
-  5 6
-  7 8"
-    );
-
-    test!(
-        &vec![vec![[1, 2], [3, 4]], vec![[5, 6], [7, 8]]],
         "\
 --
   1 2
@@ -299,7 +247,6 @@ Beware the Jubjub bird, and shun
 fn section_tuple() {
     test!(
         &vec![(1, 2)],
-        "1 2\n",
         "\
 1
   2"
@@ -307,9 +254,6 @@ fn section_tuple() {
 
     test!(
         &vec![(1, 2), (3, 4)],
-        "\
-1 2
-3 4",
         "\
 1
 \t2
@@ -326,43 +270,6 @@ fn section_tuple() {
 Lorem
   ipsum dolor sit amet
   consectetur adipiscing elit"
-    );
-}
-
-#[test]
-fn tuple_tail_line_mode() {
-    // Can still inline things if the last tuple item isn't a word token.
-
-    test!(&vec![(s("Foo"), s("Bar Baz Quux"))], "Foo Bar Baz Quux\n");
-
-    test!(
-        &vec![(s("Foo"), s("Bar"), s("Baz Quux"))],
-        "Foo Bar Baz Quux\n"
-    );
-
-    // Now it's not the last item that's line-like, have to go block mode.
-    test!(
-        &vec![(s("Foo"), s("Bar Baz"), s("Quux"))],
-        "\
---
-  Foo
-  Bar Baz
-  Quux"
-    );
-}
-
-#[test]
-fn tuple_tail_option() {
-    let val: (i32, i32, Option<i32>) = (1, 2, Some(3));
-    test!(
-        &val, "1
-2
-3"
-    );
-    let val: (i32, i32, Option<i32>) = (1, 2, None);
-    test!(
-        &val, "1
-2"
     );
 }
 
@@ -494,15 +401,16 @@ foo
     );
 }
 
-#[test]
-fn simple_struct() {
-    #[derive(Clone, Eq, PartialEq, Default, Debug, Serialize, Deserialize)]
-    struct Simple {
-        name_text: String,
-        x: i32,
-        y: i32,
-    }
+#[derive(Clone, Eq, PartialEq, Default, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+struct Simple {
+    name_text: String,
+    x: i32,
+    y: i32,
+}
 
+#[test]
+fn simple_struct_parse() {
     test!(
         &Simple {
             name_text: s("Foo bar"),
@@ -510,67 +418,105 @@ fn simple_struct() {
             y: 2,
         },
         "\
-name-text: Foo bar
-x: 1
-y: 2",
+name-text Foo bar
+x 1
+y 2",
         "\
 -- Comment at start.
-name-text: Foo bar
-x: 1
-y: 2",
+name-text Foo bar
+x 1
+y 2",
         "\
 -- Comments
 
 -- and blank lines
-name-text: Foo bar
-x: 1
-y: 2",
+name-text Foo bar
+x 1
+y 2",
         "\
-name-text: Foo bar
+name-text Foo bar
 -- Comment in the middle
-x: 1
-y: 2",
+x 1
+y 2",
         "\
-name-text: Foo bar
-x: 1
-y: 2
+name-text Foo bar
+x 1
+y 2
 -- Comment at end"
     );
+}
 
-    // Must fail if there's no _contents field to grab contents
-    fails_at::<Simple>(
-        4,
+#[test]
+fn simple_struct_errors() {
+    // Fails on extra junk at end
+    fails::<Simple>(
         "\
-name-text: Foo bar
-x: 1
-y: 2
+name-text Foo bar
+x 1
+y 2
 chaff",
     );
 
     // Must fail if a field can't be handled.
-    fails_at::<Simple>(
-        4,
+    fails::<Simple>(
         "\
-name-text: a
-x: 1
-y: 2
-unexpected: stuff",
+name-text a
+x 1
+y 2
+unexpected stuff",
     );
 
-    // Values must not have both inline and outline component.
-    fails_at::<Simple>(
-        1,
+    // Key isn't a word.
+    fails::<Simple>(
         "\
-name-text: a
+name-text a
   b
-x: 1
-y: 2",
+x 1
+y 2",
+    );
+}
+
+#[test]
+fn colon_struct() {
+    test!(
+        &(
+            Simple {
+                name_text: s("A"),
+                x: 1,
+                y: 2
+            },
+            s("Content")
+        ),
+        _,
+        "\
+:name-text A
+:x 1
+:y 2
+Content"
+    );
+
+    // No content
+    test!(
+        &(
+            Simple {
+                name_text: s("A"),
+                x: 1,
+                y: 2
+            },
+            String::new()
+        ),
+        _,
+        "\
+:name-text A
+:x 1
+:y 2"
     );
 }
 
 #[test]
 fn struct_block_value() {
     #[derive(Clone, Eq, PartialEq, Default, Debug, Serialize, Deserialize)]
+    #[serde(rename_all = "kebab-case")]
     struct Simple {
         name_text: String,
         x: i32,
@@ -582,10 +528,10 @@ fn struct_block_value() {
             x: 1,
         },
         "\
-name-text:
+name-text
   Foo
   bar
-x: 1"
+x 1"
     );
 }
 
@@ -604,11 +550,11 @@ fn map_structs() {
         ]),
         "\
 one
-  x: 3
-  y: 4
+  x 3
+  y 4
 two
-  x: 5
-  y: 6",
+  x 5
+  y 6",
     );
 }
 
@@ -621,9 +567,9 @@ fn vector_struct() {
 
     test!(
         &Vectored { v: vec![1, 2, 3] },
-        "v: 1 2 3\n",
+        "v 1 2 3\n",
         "\
-v:
+v
   1
   2
   3"
@@ -638,9 +584,9 @@ v:
         &VectoredString {
             v: vec![s("a"), s("b"), s("c")],
         },
-        "v: a b c\n",
+        "v a b c\n",
         "\
-v:
+v
   a
   b
   c"
@@ -668,11 +614,11 @@ fn indented_vector_struct() {
         ],
         "\
 --
-  v: 1 2
-  x: 3
+  v 1 2
+  x 3
 --
-  v: 4 5
-  x: 6"
+  v 4 5
+  x 6"
     );
 }
 
@@ -702,158 +648,11 @@ fn options_struct() {
         ],
         "\
 --
-  a: 1
+  a 1
 --
-  b: 2
+  b 2
 --
-  c: 3"
-    );
-}
-
-/*
-#[test]
-fn struct_flatten() {
-    XXX: Does not currently work, see https://github.com/serde-rs/serde/issues/1346
-    FIXME if the Serde issue gets resolved.
-
-     #[derive(Clone, Eq, PartialEq, Default, Debug, Serialize, Deserialize)]
-     struct Nested {
-         #[serde(flatten)]
-         simple: Simple,
-     }
-
-     test(
-         "\
-name-text: Foo bar
-x: 1
-y: 2",
-         &Nested {
-             simple: Simple {
-                 name_text: s("Foo bar"),
-                 x: 1,
-                 y: 2,
-             },
-         },
-     );
-}
-*/
-
-#[test]
-fn struct_contents() {
-    #[derive(Clone, Eq, PartialEq, Default, Debug, Serialize, Deserialize)]
-    struct Contentful {
-        x: i32,
-        y: i32,
-        _contents: Outline,
-    }
-
-    test!(
-        &Contentful {
-            x: 1,
-            y: 2,
-            _contents: outline![["A", "B"]],
-        },
-        "\
-x: 1
-y: 2
-A
-\tB",
-    );
-
-    test!(
-        &Contentful {
-            x: 1,
-            y: 2,
-            _contents: outline![["-- Must catch comments here", "B"]],
-        },
-        "\
-x: 1
-y: 2
--- Must catch comments here
-\tB",
-    );
-
-    #[derive(Clone, Eq, PartialEq, Default, Debug, Serialize, Deserialize)]
-    struct Contentful2 {
-        x: i32,
-        y: i32,
-        _contents: Vec<String>,
-    }
-    test!(
-        &Contentful2 {
-            x: 1,
-            y: 2,
-            _contents: vec![s("A"), s("B")],
-        },
-        "\
-x: 1
-y: 2
-A
-B",
-    );
-
-    #[derive(Clone, Eq, PartialEq, Default, Debug, Serialize, Deserialize)]
-    struct Recursive {
-        #[serde(default, skip_serializing_if = "is_default")]
-        a: i32,
-        #[serde(default)]
-        _contents: BTreeMap<String, Recursive>,
-    }
-
-    test!(
-        &Recursive {
-            a: 1,
-            _contents: BTreeMap::from_iter(vec![(
-                s("x"),
-                Recursive {
-                    a: 2,
-                    ..Default::default()
-                },
-            )]),
-        },
-        "\
-a: 1
-x
-  a: 2",
-    );
-
-    test!(
-        &Recursive {
-            a: 0,
-            _contents: BTreeMap::from_iter(vec![(
-                s("item"),
-                Recursive {
-                    a: 1,
-                    ..Default::default()
-                },
-            )]),
-        },
-        "\
-item
-  a: 1",
-    );
-
-    test!(
-        &Recursive {
-            a: 0,
-            _contents: BTreeMap::from_iter(vec![(
-                s("items"),
-                Recursive {
-                    a: 0,
-                    _contents: BTreeMap::from_iter(vec![(
-                        s("item"),
-                        Recursive {
-                            a: 1,
-                            ..Default::default()
-                        },
-                    )]),
-                },
-            )]),
-        },
-        "\
-items
-  item
-    a: 1",
+  c 3"
     );
 }
 
@@ -866,11 +665,11 @@ fn oneshot_section() {
     }
 
     test!(
-        &vec![(s("Headline"), Data { x: 1, y: 2 })],
+        &(s("Headline"), Data { x: 1, y: 2 }),
         "\
 Headline
-  x: 1
-  y: 2",
+  x 1
+  y 2",
     );
 }
 
@@ -885,7 +684,7 @@ fn oneshot_section_struct_vec() {
 
     test!(
         &vec![(
-            Raw(s("Some words")),
+            s("Some words"),
             Data2 {
                 a: s("a"),
                 b: vec![s("b1"), s("b2")],
@@ -894,15 +693,15 @@ fn oneshot_section_struct_vec() {
         )],
         "\
 Some words
-  a: a
-  b: b1 b2
-  c: c",
+  a a
+  b b1 b2
+  c c",
     );
 
     test!(
         &vec![
             (
-                Raw(s("Some words")),
+                s("Some words"),
                 Data2 {
                     a: s("a"),
                     b: vec![s("b1"), s("b2")],
@@ -910,7 +709,7 @@ Some words
                 }
             ),
             (
-                Raw(s("Second run")),
+                s("Second run"),
                 Data2 {
                     a: s("a"),
                     b: vec![s("b1"), s("b2")],
@@ -920,13 +719,13 @@ Some words
         ],
         "\
 Some words
-  a: a
-  b: b1 b2
-  c: c
+  a a
+  b b1 b2
+  c c
 Second run
-  a: a
-  b: b1 b2
-  c: c",
+  a a
+  b b1 b2
+  c c",
     );
 }
 
@@ -934,7 +733,7 @@ Second run
 fn oneshot_section_map_vec() {
     test!(
         &vec![(
-            Raw(s("Some words")),
+            s("Some words"),
             BTreeMap::from_iter(
                 vec![(s("a"), vec![1, 2]), (s("b"), vec![3, 4])].into_iter()
             )
@@ -948,14 +747,14 @@ Some words
     test!(
         &vec![
             (
-                Raw(s("Some words")),
+                s("Some words"),
                 BTreeMap::from_iter(
                     vec![(s("a"), vec![1, 2]), (s("b"), vec![3, 4])]
                         .into_iter()
                 )
             ),
             (
-                Raw(s("Second run")),
+                s("Second run"),
                 BTreeMap::from_iter(
                     vec![(s("a"), vec![1, 2]), (s("b"), vec![3, 4])]
                         .into_iter()
@@ -972,112 +771,136 @@ Second run
     );
 }
 
-#[test]
-fn oneshot_section_tuples() {
-    test!(
-        &vec![(
-            Raw(s("Some words")),
-            ((1, 2, 3, vec![4, 5, 6]), (4, 5, 6), (7, 8, 9))
-        )],
-        "\
-Some words
-  1 2 3 4 5 6
-  4 5 6
-  7 8 9"
-    );
+#[derive(Clone, PartialEq, Default, Debug, Serialize, Deserialize)]
+struct Star {
+    age: f32,
+    mass: f32,
+}
+
+#[derive(Clone, PartialEq, Default, Debug, Serialize, Deserialize)]
+struct Planet {
+    orbit: f32,
+    mass: f32,
+}
+
+lazy_static! {
+    #[rustfmt::skip]
+    static ref STARMAP: IndexMap<String, (Star, IndexMap<String, Planet>)> = IndexMap::from_iter(
+        vec![
+            (s("Sol"),
+            (Star { age: 4.6e9, mass: 1.0},
+             IndexMap::from_iter(vec![
+                 (s("Mercury"), Planet { orbit: 0.39, mass: 0.055 }),
+                 (s("Venus"),   Planet { orbit: 0.72, mass: 0.815 }),
+                 (s("Earth"),   Planet { orbit: 1.0,  mass: 1.0 }),
+                 (s("Mars"),    Planet { orbit: 1.52, mass: 0.1 })
+            ].into_iter()))),
+            (s("Alpha Centauri"),
+            (Star { age: 5.3e9, mass: 1.1},
+             IndexMap::from_iter(vec![
+                 (s("Eurytion"), Planet { orbit: 0.47, mass: 0.08 }),
+                 (s("Chiron"),   Planet { orbit: 1.32, mass: 1.33 }),
+            ].into_iter()))),
+        ].into_iter());
 }
 
 #[test]
 fn nesting_contents() {
-    #[derive(Clone, PartialEq, Default, Debug, Serialize, Deserialize)]
-    struct Star {
-        age: f32,
-        mass: f32,
-        _contents: BTreeMap<String, Planet>,
-    }
-
-    #[derive(Clone, PartialEq, Default, Debug, Serialize, Deserialize)]
-    struct Planet {
-        orbit: f32,
-        mass: f32,
-    }
-
-    #[rustfmt::skip]
-    let starmap = BTreeMap::from_iter(
-        vec![
-            (s("Sol"),
-             Star { age: 4.6e9, mass: 1.0,
-                    _contents: BTreeMap::from_iter(
-                        vec![
-                            (s("Mercury"),
-                             Planet { orbit: 0.39, mass: 0.055 }),
-                            (s("Venus"),
-                             Planet { orbit: 0.72, mass: 0.815 }),
-                            (s("Earth"),
-                             Planet { orbit: 1.0, mass: 1.0 }),
-                            (s("Mars"),
-                             Planet { orbit: 1.52, mass: 0.1 })
-                        ].into_iter(),
-                    ),
-                },
-            ),
-            (s("Alpha Centauri"),
-             Star { age: 5.3e9, mass: 1.1,
-                    _contents: BTreeMap::from_iter(
-                        vec![
-                            (s("Eurytion"),
-                             Planet { orbit: 0.47, mass: 0.08 }),
-                            (s("Chiron"),
-                             Planet { orbit: 1.32, mass: 1.33 }),
-                        ].into_iter(),
-                    ),
-                },
-            ),
-        ].into_iter(),
-    );
-
     test!(
-        &starmap,
+        &*STARMAP,
+        "\
+Sol
+  :age 4600000000
+  :mass 1
+  Mercury
+    orbit 0.39
+    mass 0.055
+  Venus
+    orbit 0.72
+    mass 0.815
+  Earth
+    orbit 1
+    mass 1
+  Mars
+    orbit 1.52
+    mass 0.1
+Alpha Centauri
+  :age 5300000000
+  :mass 1.1
+  Eurytion
+    orbit 0.47
+    mass 0.08
+  Chiron
+    orbit 1.32
+    mass 1.33",
+        "\
+Sol
+  :age 4600000000
+  :mass 1
+  Mercury
+    :orbit 0.39
+    :mass 0.055
+  Venus
+    :orbit 0.72
+    :mass 0.815
+  Earth
+    :orbit 1
+    :mass 1
+  Mars
+    :orbit 1.52
+    :mass 0.1
+Alpha Centauri
+  :age 5300000000
+  :mass 1.1
+  Eurytion
+    :orbit 0.47
+    :mass 0.08
+  Chiron
+    :orbit 1.32
+    :mass 1.33"
+    );
+}
+
+#[test]
+fn nesting_contents_2() {
+    // Section-like adorned field.
+    test!(
+        &(
+            Simple {
+                name_text: s("foo\nbar"),
+                x: 1,
+                y: 2
+            },
+            s("Content")
+        ),
+        "\
+:name-text
+  foo
+  bar
+:x 1
+:y 2
+Content"
+    );
+}
+
+#[test]
+fn inline_structs() {
+    test!(
+        &*STARMAP,
         _,
         "\
 Sol
-  age: 4.6e9
-  mass: 1.0
-  Mercury
-    orbit: 0.39
-    mass: 0.055
-  Venus
-    orbit: 0.72
-    mass: 0.815
-  Earth
-    orbit: 1.0
-    mass: 1.0
-  Mars
-    orbit: 1.52
-    mass: 0.1
-Alpha Centauri
-  age: 5.3e9
-  mass: 1.1
-  Eurytion
-    orbit: 0.47
-    mass: 0.08
-  Chiron
-    orbit: 1.32
-    mass: 1.33",
-        // Nice and compact inline structs.
-        "\
-Sol
-  age: 4.6e9
-  mass: 1.0
-  --       orbit: mass:
+  :age 4.6e9
+  :mass 1.0
+  --       :orbit :mass
   Mercury  0.39  0.055
   Venus    0.72  0.815
   Earth    1.0   1.0
   Mars     1.52  0.1
 Alpha Centauri
-  age: 5.3e9
-  mass: 1.1
-  --        orbit: mass:
+  :age 5.3e9
+  :mass 1.1
+  --        :orbit :mass
   Eurytion  0.47  0.08
   Chiron    1.32  1.33"
     );
@@ -1150,207 +973,67 @@ y: s("a"),
 */
 
 #[test]
-fn comment_value() {
-    #[derive(Eq, PartialEq, Debug, Serialize, Deserialize)]
-    pub struct Ch {
-        c: String,
-    }
-    test!(
-        &Ch { c: "--".into() },
-        "\
-c: --
-",
-    );
-}
-
-#[test]
 fn test_generic_attributes() {
     #[derive(PartialEq, Default, Debug, Serialize, Deserialize)]
     struct Partial {
         a: u32,
-        _attributes: BTreeMap<String, u32>,
+        #[serde(flatten)]
+        attributes: BTreeMap<String, String>,
     }
 
     test!(
         &Partial {
             a: 1,
-            _attributes: BTreeMap::from_iter(vec![(s("b"), 2)].into_iter())
+            attributes: BTreeMap::from_iter(vec![(s("b"), s("2"))].into_iter())
         },
         "\
-a: 1
-b: 2"
+a 1
+b 2"
     );
 
     test!(
         &Partial {
             a: 1,
-            _attributes: BTreeMap::from_iter(
+            attributes: BTreeMap::from_iter(
                 vec![
-                    (s("b"), 2),
+                    (s("b"), s("2")),
                     // Note that _attributes fields do not get converted to
-                    // camel_case from kebab-case.
-                    (s("foo-bar"), 6),
-                    (s("xyzzy"), 5)
+                    // snake_case from kebab-case.
+                    (s("foo-bar"), s("6")),
+                    (s("xyzzy"), s("5"))
                 ]
                 .into_iter()
             )
         },
         "\
-a: 1
-b: 2
-foo-bar: 6
-xyzzy: 5"
+a 1
+b 2
+foo-bar 6
+xyzzy 5"
     );
 }
 
 #[derive(PartialEq, Default, Debug, Serialize, Deserialize)]
-struct AnyStruct {
-    #[serde(default)]
-    _attributes: BTreeMap<String, String>,
-    #[serde(default)]
-    _contents: Vec<(Raw<String>, AnyStruct)>,
-}
+struct DataOutline(Vec<(String, (IndexMap<String, String>, DataOutline))>);
 
 #[test]
-fn test_attribute_outline() {
-    test!(&AnyStruct::default(), "");
+fn test_data_outline() {
+    test!(&DataOutline::default(), "");
+
+    test!(&DataOutline(vec![(s("A"), Default::default())]), "A\n");
 
     test!(
-        &AnyStruct {
-            _contents: vec![(Raw(s("A")), AnyStruct::default())],
-            ..Default::default()
-        },
-        "A"
-    );
-
-    test!(
-        &AnyStruct {
-            _contents: vec![(
-                Raw(s("Title")),
-                AnyStruct {
-                    _attributes: vec![(s("attr"), s("123"))]
-                        .into_iter()
-                        .collect(),
-                    _contents: vec![(Raw(s("Subpage")), AnyStruct::default())]
-                }
-            )],
-            ..Default::default()
-        },
+        &DataOutline(vec![(
+            s("Title"),
+            (
+                vec![(s("attr"), s("123"))].into_iter().collect(),
+                DataOutline(vec![(s("Subpage"), Default::default())])
+            )
+        )]),
         "\
 Title
-  attr: 123
+  :attr 123
   Subpage"
-    );
-}
-
-#[test]
-fn test_attribute_outline_2() {
-    // Non-idiomatic way that starts with a StructOutline.
-    // Has different failure modes, so keeping it as a test.
-    type StructOutline = Vec<(Raw<String>, AnyStruct)>;
-
-    test!(&StructOutline::default(), "");
-
-    test!(&vec![(Raw(s("A")), AnyStruct::default())], "A");
-
-    test!(
-        &vec![(
-            Raw(s("Title")),
-            AnyStruct {
-                _attributes: vec![(s("attr"), s("123"))].into_iter().collect(),
-                _contents: vec![(Raw(s("Subpage")), AnyStruct::default())]
-            }
-        )],
-        "\
-Title
-  attr: 123
-  Subpage"
-    );
-}
-
-#[test]
-fn attribute_errors() {
-    fails_at::<AnyStruct>(
-        3,
-        "\
-a1: 1
-a2: 2
-bad-attr: Can't have stuff both here
-  and here
-Content",
-    );
-}
-
-#[test]
-fn allowed_attributes() {
-    #[derive(PartialEq, Default, Debug, Serialize, Deserialize)]
-    struct AttrBag {
-        #[serde(default)]
-        _attributes: Vec<(String, String)>,
-    }
-
-    // Test that the basic stuff works.
-    test!(
-        &AttrBag {
-            _attributes: vec![(s("foo"), s("bar"))]
-        },
-        "foo: bar\n"
-    );
-    // Outline form must make a difference.
-    test!(
-        &AttrBag {
-            _attributes: vec![(s("foo"), s("bar\nbaz"))]
-        },
-        "\
-foo:
-  bar
-  baz"
-    );
-    // Hyphens inside the attribute are fine.
-    test!(
-        &AttrBag {
-            _attributes: vec![(s("xyz-zy"), s("2"))]
-        },
-        "xyz-zy: 2\n"
-    );
-    // Numbers after start are fine
-    test!(
-        &AttrBag {
-            _attributes: vec![(s("bfg9000"), s("666"))]
-        },
-        "bfg9000: 666\n"
-    );
-
-    // Collection of the various syntax problems with attributes.
-    fails_at::<AttrBag>(1, "no-colon 1\n");
-    fails_at::<AttrBag>(1, "spaced out: 1\n");
-    fails_at::<AttrBag>(1, "nbspd\u{00A0}out: 1\n");
-    fails_at::<AttrBag>(1, "0numberstart: 1\n");
-    fails_at::<AttrBag>(1, "-hyphenstart: 1\n");
-    fails_at::<AttrBag>(1, "under_lined: 1\n");
-    fails_at::<AttrBag>(1, "uɴіϲοԁе-ѡаѕ-а-ⅿⅰstακe: 1\n");
-    fails_at::<AttrBag>(1, "Capitalized: 1\n");
-    fails_at::<AttrBag>(1, "cameLized: 1\n");
-    fails_at::<AttrBag>(1, "extra-colon:: 1\n");
-    fails_at::<AttrBag>(1, ":: 1\n");
-    fails_at::<AttrBag>(1, "punct.uation: 1\n");
-
-    // Also check structural problems.
-    // Must have a value.
-    fails_at::<AttrBag>(1, "no-value:\n");
-    // Must be inline or outline, not both.
-    fails_at::<AttrBag>(
-        1,
-        "\
-mixed-form: 1
-  2",
-    );
-    // Attributes must be unique.
-    fails_at::<AttrBag>(
-        2,
-        "\
-repeat: 1
-repeat: 2",
     );
 }
 
@@ -1419,8 +1102,4 @@ where
 // Conveninence constructor for String literals.
 fn s(s: &str) -> String {
     s.to_string()
-}
-
-pub fn is_default<T: Default + Eq>(a: &T) -> bool {
-    a == &Default::default()
 }

@@ -64,7 +64,9 @@ impl Error {
     }
 
     pub fn with_line_num(mut self, line_num: usize) -> Error {
-        self.line_num = Some(line_num);
+        if self.line_num.is_none() {
+            self.line_num = Some(line_num);
+        }
         self
     }
 

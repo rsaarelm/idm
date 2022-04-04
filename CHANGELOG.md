@@ -6,18 +6,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 ### Changes
-- Toplevel sequence type can now be deserialized from inline sequence
-- Parser using an immutable data structure
+- Horizontal sequences can now show up at the parsing top level when the input
+  has now newlines
+- New parser data structure based on an immutable parse tree object
+- Unified structs and maps, syntactic sugar replaces separate struct syntax
+- Due to struct and map unification, serde's struct flattening can now be used
+- Removed `_contents` magic field from struct parsing, fields + contents
+  entries are now represented as pairs and using the new colon prefix syntax
+  to mark the struct half
 ### Additions
-- Generic attribute collection using `_attributes` reserved field name
-- Inline struct support
+- Horizontal struct support
 - Enumeration type support
 
 ## [0.2.0] - 2021-09-09
 ### Changes
 - Do not support empty headlines
 - Raw mode is now indicated by byte buffer type instead of `Option`
-- Comma separator syntax is removed, comments are now used as structural separators
+- Comma separator syntax is removed, comments are now used as structural
+  separators
 ### Fixes
 - Section-like pair tuples are parsed correctly
 ### Additions

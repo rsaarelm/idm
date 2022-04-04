@@ -1,11 +1,11 @@
 //! Stateless parsing primitivies.
 use std::fmt;
 
-type Result<'a, T> = std::result::Result<(T, &'a str), &'a str>;
+type ParseResult<'a, T> = std::result::Result<(T, &'a str), &'a str>;
 
 /// Extract a whitespace-separated word from the start of the input. Skip all
 /// whitespace after it.
-pub fn word(input: &str) -> Result<&str> {
+pub fn word(input: &str) -> ParseResult<&str> {
     let end_pos = input
         .char_indices()
         .find_map(|(i, c)| c.is_idm_whitespace().then(|| i))
@@ -25,45 +25,18 @@ pub fn word(input: &str) -> Result<&str> {
     }
 }
 
-pub fn attribute_name(input: &str) -> Result<&str> {
-    let (word, rest) = word(input)?;
-
-    // basically a regex but I don't want to import regex crate for just this
-    // one thing...
-    // "^[a-z][a-z0-9-]*:$"
-    if word.len() < 2 {
-        return Err(input);
+/// Split a line into words
+pub fn words(input: &str) -> (Vec<&str>, &str) {
+    let mut ret = Vec::new();
+    let mut current = input;
+    while let Ok((word, rest)) = word(current) {
+        current = rest;
+        ret.push(word);
     }
-    for (i, c) in word.chars().enumerate() {
-        if i == 0 {
-            if !c.is_ascii_lowercase() {
-                return Err(input);
-            }
-        } else if i == word.len() - 1 {
-            if c != ':' {
-                return Err(input);
-            }
-        } else {
-            if c != '-' && !c.is_ascii_lowercase() && !c.is_ascii_digit() {
-                return Err(input);
-            }
-        }
-    }
-
-    // Return the name without the trailing colon.
-    Ok((&word[0..word.len() - 1], rest))
+    (ret, current)
 }
 
-pub fn rust_attribute_name(input: &str) -> Result<String> {
-    let (word, rest) = attribute_name(input)?;
-
-    // Convert from IDM's kebab-case to Rust's camel_case.
-    let word = word.replace("-", "_");
-
-    Ok((word, rest))
-}
-
-pub fn line(input: &str) -> Result<&str> {
+pub fn line(input: &str) -> ParseResult<&str> {
     input
         .char_indices()
         .find_map(|(i, c)| {
@@ -76,6 +49,32 @@ pub fn line(input: &str) -> Result<&str> {
         .unwrap_or(Ok((input, "")))
 }
 
+/// Like str::trim_end, but retain content up to and including the first
+/// newline after the end of non-whitespace content if such newline exists.
+///
+/// This is needed to maintain the separation between newline-less single-line
+/// fragments and single line outlines with the newline in IDM input.
+pub fn smart_trim_end(input: &str) -> &str {
+    let mut first_ending_newline = None;
+    let len = input.len();
+    for (i, c) in input.chars().rev().enumerate() {
+        if c == '\n' {
+            first_ending_newline = Some(len - i);
+        }
+        if !c.is_whitespace() {
+            break;
+        }
+    }
+
+    if let Some(i) = first_ending_newline {
+        // Trim whitespace past the last newline.
+        &input[..i]
+    } else {
+        // No newlines after content, trim everything.
+        input.trim_end()
+    }
+}
+
 /// Indentation for any line.
 ///
 /// If the line is blank and `line_indent` would return `None`, use the
@@ -86,7 +85,7 @@ pub fn line(input: &str) -> Result<&str> {
 ///
 /// Returns an error if it finds mixed tabs and spaces in indentation, if
 /// an error is returned the input can be considered unsalvageable.
-pub fn indent(input: &str) -> Result<Indent> {
+pub fn indent(input: &str) -> ParseResult<Indent> {
     let mut pos = input;
 
     loop {
@@ -101,7 +100,7 @@ pub fn indent(input: &str) -> Result<Indent> {
 }
 
 /// Indentation for a single line, if defined.
-fn line_indent(input: &str) -> Result<Option<Indent>> {
+fn line_indent(input: &str) -> ParseResult<Option<Indent>> {
     let mut indent = Indent::default();
 
     for (i, c) in input.char_indices() {
@@ -243,6 +242,7 @@ impl fmt::Display for Indent {
         Ok(())
     }
 }
+
 #[cfg(test)]
 mod tests {
     use crate::parse::{self, CharExt, Indent};

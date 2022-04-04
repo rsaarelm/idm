@@ -1,3 +1,5 @@
+**TODO: README is out of date, update for v0.3**
+
 # Implicit Data Markup
 
 IDM is a non-self-describing data serialization format intended to be both
@@ -134,7 +136,7 @@ included, since every line of content is read as a `Raw` value.
 ### Structs
 
 Struct fields are in kebab-case (the Serde IDM implementation automatically
-converts between Rust's default camel\_case and kebab-case) and followed by a
+converts between Rust's default snake\_case and kebab-case) and followed by a
 colon. The valid fields of a struct block must be in the initial lines, lines
 from the first field that can't be parsed as a struct field onwards are
 treated as additional contents.
@@ -270,34 +272,39 @@ the body of a section with a missing headline. Input files are a block-like
 outline, so the parser may do hacky things like declaring the whole thing to
 be a single section with a missing headline at line -1 and depth -1.
 
-## Parse matrix
+## Accepted shapes
 
-|                   | Inline item (word)     | Full line                      | Block                         | Section                                         |
-|-------------------|------------------------|--------------------------------|-------------------------------|-------------------------------------------------|
-| primitive         | read as string, parse  | read as string, parse          | read as string, parse         | n/a                                             |
-| string            | read to whitespace/EOL | read to EOL                    | read to end of indented block | read 1st line and more indented subsequent ones |
-| tuple             | n/a                    | words are items                | block sections are items      | headline is 1st item, body is rest              |
-| seq               | n/a                    | words are items                | block sections are items      | n/a                                             |
-| struct / map      | n/a                    | n/a                            | block sections are items      | n/a                                             |
-| struct / map item | n/a                    | key is 1st word, value is rest | n/a                           | headline is key, body is value                  |
+| Type             | Vertical value           | Horizontal value |
+|------------------|--------------------------|------------------|
+| atom             | block, section           | line, word       |
+| string head pair | section, line-as-section | -                |
+| map head pair    | block                    | -                |
+| map              | block                    | -                |
+| map element      | section                  | line             |
+| struct           | block                    | line             |
+| seq              | block                    | line             |
+
+Some types support both vertical (each item on their own line) and horizontal
+(every item on one line) values, the rest support only vertical values.
+
+Tuples that read a string in the first position trigger raw mode. Raw mode has
+the unique line-as-section parsing mode where it interprets a line as a
+section with an empty body. Normally a line is interpreted as the horizontal
+variant of a structured type.
 
 ## Notes
 
-* Serde's struct flattening `#[serde(flatten)]` attribute does not work well
-  with IDM. It switches from struct-like parsing to map-like parsing, and
-  those are syntactically different in IDM. A struct-like flatten operator is
-  currently an [unresolved
-  issue](https://github.com/serde-rs/serde/issues/1346) with Serde.
+* Serde's `#[serde(flatten)]` attribute does not work well with IDM if used
+  with structs. It switches from struct-like parsing to map-like parsing, and
+  stops providing types for values. The result is that all values to the
+  flattened struct are provided as strings and won't deserialize correctly. It
+  can still be useful for maps that collect string values or structs that have
+  string values (or deserialize via strings) for all their fields.
 
-* When writing matrix-like tabular data, use `Vec` instead of tuples for the
-  table rows, even when you know the table has a specific number of rows (eg.
-  it's a matrix of known size). If there are exactly two rows and a tuple type
-  is used for the rows, the section format printing for tuples will kick in
-  when serializing the table and you will end up with weird-looking results.
-
-* The `_contents` value for a struct can not be another struct with named
-  fields, because these cannot be syntactically distinguished from the fields
-  of the parent struct. You usually want it to be a map type.
+* A structural pair where the first half is a colon-indented struct or map
+  can't have the second half also be a struct or a map. Due to how the second
+  half is fused in the first, the second map cannot be syntactically
+  distinguished from the first.
 
 * To set up the locally versioned githooks, do
 

@@ -1,5 +1,8 @@
 use crate::{err, guess_indent_style, Error, Result};
-use serde::{ser, Serialize};
+use serde::{
+    ser::{self, SerializeMap},
+    Serialize,
+};
 use std::fmt;
 
 /// Serialize a value using the default indentation style.
@@ -130,7 +133,7 @@ impl Value {
     }
 
     fn is_blank_line(&self) -> bool {
-        matches!(self, Paragraph(s) if s == "\n")
+        matches!(self, Paragraph(s) if s.trim() == "")
     }
 }
 
@@ -143,20 +146,26 @@ enum Expr {
     /// from the whole, like `None` values for struct fields which will lead
     /// to the whole field omitted from the serialized struct.
     None,
-    /// Expression in raw mode (printing outlines). Cannot be inlined.
-    Raw(Box<Expr>),
     /// Non-structural value.
     Atom(Value),
     /// Expression sequence for a variable element count sequence.
     Seq(Vec<Expr>),
-    /// Expression sequence for a fixed element count tuple.
-    ///
-    /// Also used for key/value pairs. Can be formatted as a section, unlike
-    /// `Seq`.
-    Tuple(Vec<Expr>),
+    /// Key-value pairs in maps. Formatted section-like when vertical.
+    MapElement(Vec<Expr>),
+    /// Expressions with special formatting.
+    Pair(Vec<Expr>),
 }
 
-use Expr::{Atom, Raw, Seq, Tuple};
+use Expr::{Atom, MapElement, Pair, Seq};
+
+#[derive(PartialEq, Debug)]
+enum Special {
+    None,
+    /// Adorn with colons.
+    Adorn,
+    /// Element after adorn, print without comment and indent.
+    Flatten,
+}
 
 impl Default for Expr {
     fn default() -> Self {
@@ -180,7 +189,7 @@ impl Expr {
     /// to.
     fn push(&mut self, e: Expr) {
         match self {
-            Seq(es) | Tuple(es) => es.push(e),
+            Seq(es) | MapElement(es) | Pair(es) => es.push(e),
             _ => panic!("Can't append to this expr type"),
         }
     }
@@ -188,7 +197,7 @@ impl Expr {
     /// Push elements from a Seq expr into self.
     fn concat(&mut self, e: Expr) {
         match e {
-            Seq(es) | Tuple(es) => {
+            Seq(es) | MapElement(es) | Pair(es) => {
                 for e in es.into_iter() {
                     self.push(e);
                 }
@@ -205,16 +214,16 @@ impl Expr {
         matches!(self, Atom(Word(_)))
     }
 
+    fn is_sequence(&self) -> bool {
+        matches!(self, Seq(_) | MapElement(_) | Pair(_))
+    }
+
     /// Expression looks like a comment line and needs to be escaped in a
     /// sequence.
     fn looks_like_comment(&self) -> bool {
-        // NB. Raw exprs are *not* checked here, whenever you're parsing a raw
-        // item, it's expected from the type schema that it might be
-        // comment-like, and it should not be separately escaped by things
-        // that look for comment-looking things.
         match self {
-            Atom(v) => v.as_str().starts_with("--"),
-            Tuple(es) | Seq(es) => {
+            Atom(v) => v.as_str().starts_with("-- ") || v.as_str() == "--",
+            MapElement(es) | Seq(es) => {
                 es.first().map_or(false, |x| x.looks_like_comment())
             }
             _ => false,
@@ -225,16 +234,12 @@ impl Expr {
     fn can_be_tail_lined(&self) -> bool {
         match self {
             Expr::None => false,
-            // Don't check for comment-likeness for Raws, just punt to
-            // tail-lined again for the inside.
-            Raw(e) if e.is_blank_line() => true,
-            Raw(e) => e.can_be_tail_lined(),
             Atom(Paragraph(_)) => false,
             Atom(_) => true,
             // Seqs are simple, everything must be homogeneous
             Seq(es) => es.iter().all(|e| e.is_inline_token()),
             // Tuples are more complex, last item just needs to be inlinable.
-            Tuple(es) => {
+            MapElement(es) => {
                 for (i, e) in es.iter().enumerate() {
                     if i == es.len() - 1 {
                         // Last item of a tuple, can be an line item instead
@@ -248,6 +253,7 @@ impl Expr {
                 }
                 true
             }
+            Pair(_) => false,
         }
     }
 
@@ -269,15 +275,21 @@ impl Expr {
         match self {
             x if x.looks_like_comment() => false,
             // Pairs are formatted as sections if the head can be inlined.
-            Tuple(es) => {
+            MapElement(es) => {
                 es.len() == 2
                     && es.iter().next().map_or(false, |e| e.can_be_inlined())
             }
+            // Use can_be_tail_lined for pairs, it doesn't check for
+            // comment-likeness. Pair line heads are parsed in raw mode so
+            // they can look like comments.
+            Pair(es) => es
+                .iter()
+                .next()
+                .map_or(false, |e| e.can_be_tail_lined() || e.is_blank_line()),
 
             // String literals can also be section like if they're literally
             // section-shaped, ie. every line after first is indented.
             Atom(v) => v.is_line_or_section(),
-            Raw(e) => e.is_line_or_section(),
             // Out of the complex expr types, only tuples can be section-like.
             _ => false,
         }
@@ -285,12 +297,11 @@ impl Expr {
 
     fn is_empty(&self) -> bool {
         matches!(self, Expr::None)
-            || matches!(self, Tuple(es) | Seq(es) if es.is_empty())
+            || matches!(self, MapElement(es) | Seq(es) | Pair(es) if es.is_empty())
     }
 
     fn is_blank_line(&self) -> bool {
         matches!(self, Atom(Paragraph(x)) if x == "\n")
-            || matches!(self, Raw(e) if e.is_blank_line())
     }
 }
 
@@ -299,7 +310,7 @@ struct Formatted(Style, Expr);
 impl fmt::Display for Formatted {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let Formatted(ref style, ref expr) = self;
-        style.expr_outline(f, 0, expr)
+        style.expr_outline(f, 0, false, expr)
     }
 }
 
@@ -389,9 +400,8 @@ impl Style {
         expr: &Expr,
     ) -> fmt::Result {
         match expr {
-            Raw(e) => self.expr_inline(f, e),
             Atom(v) => self.value_inline(f, v),
-            Seq(es) | Tuple(es) if expr.can_be_inlined() => {
+            Seq(es) | MapElement(es) if expr.can_be_inlined() => {
                 for (i, e) in es.iter().enumerate() {
                     if i != 0 {
                         write!(f, " ")?;
@@ -405,31 +415,31 @@ impl Style {
     }
 
     /// Print an expression in outline form indented to the given depth.
-    ///
-    /// Does not do any escaping for block-shaped or comment-looking exprs.
-    /// Use `expr_pointed` if you need that.
     fn expr_outline(
         &self,
         f: &mut fmt::Formatter<'_>,
         depth: i32,
+        is_adorned: bool,
         expr: &Expr,
     ) -> fmt::Result {
         match expr {
             Expr::None => Ok(()),
             e if e.is_blank_line() => writeln!(f),
-            Raw(e) => self.expr_outline(f, depth, e),
             Atom(v) => self.value_outline(f, depth, v),
-            Seq(es) | Tuple(es) => {
+            Seq(es) | MapElement(es) | Pair(es) => {
                 if expr.is_line_or_section() {
                     match es.as_slice() {
                         [head, body] => {
                             if !head.is_blank_line() {
                                 self.indent(f, depth)?;
+                                if is_adorned {
+                                    write!(f, ":")?;
+                                }
                                 self.expr_inline(f, head)?;
                             }
                             writeln!(f)?;
 
-                            self.expr_outline(f, depth + 1, body)?;
+                            self.expr_outline(f, depth + 1, false, body)?;
 
                             Ok(())
                         }
@@ -438,8 +448,27 @@ impl Style {
                         }
                     }
                 } else {
-                    for e in es {
-                        self.sequence_expr(f, depth, e)?;
+                    let mut was_adorned = false;
+                    for (i, e) in es.iter().enumerate() {
+                        let special;
+
+                        if is_adorned {
+                            // Sticky adornment.
+                            special = Special::Adorn;
+                        } else if matches!(expr, MapElement(_) | Pair(_))
+                            && e.is_sequence()
+                            && es.len() == 2
+                            && i == 0
+                        {
+                            was_adorned = true;
+                            special = Special::Adorn;
+                        } else if i == 1 && was_adorned {
+                            special = Special::Flatten;
+                        } else {
+                            special = Special::None;
+                        }
+
+                        self.sequence_expr(f, depth, special, e)?;
                     }
                     Ok(())
                 }
@@ -463,6 +492,7 @@ impl Style {
         &self,
         f: &mut fmt::Formatter<'_>,
         depth: i32,
+        special: Special,
         expr: &Expr,
     ) -> fmt::Result {
         if expr.is_blank_line() {
@@ -471,9 +501,12 @@ impl Style {
         }
 
         if expr.can_be_inlined() {
-            // Doesn't look like a comment, doesn't have Raw as part of
-            // sequence, doesn't have non-inlineable sequence nesting.
+            // Doesn't look like a comment, doesn't have non-inlineable
+            // sequence nesting.
             self.indent(f, depth)?;
+            if special == Special::Adorn {
+                write!(f, ":")?;
+            }
             self.expr_inline(f, expr)?;
             writeln!(f)?;
             return Ok(());
@@ -483,7 +516,7 @@ impl Style {
             // Section-looking things can be printed without escaping the
             // depth. Again, the predicate isn't true if the expr looks like a
             // comment.
-            self.expr_outline(f, depth, expr)?;
+            self.expr_outline(f, depth, special == Special::Adorn, expr)?;
             return Ok(());
         }
 
@@ -496,9 +529,15 @@ impl Style {
         // multi-line block. Treatment is the same in both cases, insert a
         // separator comment line and print the expr normally under it.
 
-        self.indent(f, depth)?;
-        writeln!(f, "--")?;
-        self.expr_outline(f, depth + 1, expr)?;
+        if special == Special::Adorn {
+            self.expr_outline(f, depth, true, expr)?;
+        } else if special == Special::Flatten {
+            self.expr_outline(f, depth, false, expr)?;
+        } else {
+            self.indent(f, depth)?;
+            writeln!(f, "--")?;
+            self.expr_outline(f, depth + 1, false, expr)?;
+        }
         Ok(())
     }
 }
@@ -578,13 +617,8 @@ impl<'a> ser::Serializer for &'a mut Serializer {
         }
     }
 
-    fn serialize_bytes(self, v: &[u8]) -> Result<Expr> {
-        let s = std::str::from_utf8(v)
-            .map_err(|_| Error::new("serialize_bytes: Invalid UTF-8"))?;
-        if s.find('\n').is_some() {
-            return err!("serialize_bytes: Cannot have multiline raw values.");
-        }
-        Ok(Raw(Box::new(s.serialize(self)?)))
+    fn serialize_bytes(self, _: &[u8]) -> Result<Expr> {
+        unimplemented!();
     }
 
     fn serialize_none(self) -> Result<Expr> {
@@ -644,7 +678,10 @@ impl<'a> ser::Serializer for &'a mut Serializer {
     }
 
     fn serialize_tuple(self, len: usize) -> Result<Self::SerializeTuple> {
-        self.serialize_seq(Some(len))
+        if len != 2 {
+            unimplemented!("Non-pair (len = {}) tuples are not supported", len);
+        }
+        Ok(SeqSerializer::new(len).is_pair())
     }
 
     fn serialize_tuple_struct(
@@ -652,7 +689,7 @@ impl<'a> ser::Serializer for &'a mut Serializer {
         _name: &'static str,
         len: usize,
     ) -> Result<Self::SerializeTupleStruct> {
-        self.serialize_seq(Some(len))
+        Ok(SeqSerializer::new(len))
     }
 
     fn serialize_tuple_variant(
@@ -691,11 +728,17 @@ impl<'a> ser::Serializer for &'a mut Serializer {
 #[derive(Default)]
 struct SeqSerializer {
     idx: usize,
+    is_pair: bool,
     /// Will contain the first item if this is an indent-style tuple.
     acc: Expr,
 }
 
 impl SeqSerializer {
+    pub fn is_pair(mut self) -> SeqSerializer {
+        self.is_pair = true;
+        self
+    }
+
     pub fn new(_len: usize) -> SeqSerializer {
         Default::default()
     }
@@ -705,7 +748,11 @@ impl SeqSerializer {
         T: ?Sized + Serialize,
     {
         if self.idx == 0 {
-            self.acc = Tuple(Vec::new());
+            if self.is_pair {
+                self.acc = Pair(Vec::new());
+            } else {
+                self.acc = MapElement(Vec::new());
+            }
         }
         self.idx += 1;
 
@@ -835,7 +882,7 @@ impl<'a> ser::SerializeMap for MapSerializer {
     fn end(self) -> Result<Expr> {
         let mut ret = Seq(Vec::new());
         for (key, value) in self.values.into_iter() {
-            ret.push(Tuple(vec![key, value]));
+            ret.push(MapElement(vec![key, value]));
         }
         Ok(ret)
     }
@@ -849,60 +896,14 @@ impl<'a> ser::SerializeStruct for MapSerializer {
     where
         T: ?Sized + Serialize,
     {
-        let value = value.serialize(&mut Serializer::default())?;
-        if value.is_empty() {
-            return Ok(());
-        }
-
-        if !value.is_empty() {
-            if key == "_contents" {
-                // Magic contents key!
-                self.contents = value;
-            } else if key == "_attributes" {
-                // XXX: Fix repeating error message.
-                if let Seq(es) = value {
-                    for e in &es {
-                        if let Tuple(t) = e {
-                            if let [Atom(Word(k)), v] = t.as_slice() {
-                                self.values.push((
-                                    Atom(Word(format!("{}:", k))),
-                                    v.clone(),
-                                ));
-                            } else {
-                                return err!("_attributes value does not look like a map");
-                            }
-                        } else {
-                            return err!(
-                                "_attributes value does not look like a map"
-                            );
-                        }
-                    }
-                    return Ok(());
-                }
-                return err!("_attributes value does not look like a map");
-            } else if key.starts_with('_') {
-                // Refuse to emit keys that might look like comments when
-                // converted to kebab-case.
-                //
-                // Assume that all keys that start with underlines are special
-                // features like "_contents" and will not be emitted.
-                return err!("serialize_field: Unhandled underline-prefixed struct field: ({:?}), rename regular fields to start with letters", key);
-            } else {
-                // Just a regular key, kebabize it.
-                let kebab_key = key.replace("_", "-");
-                self.values.push((
-                    Expr::from(format!("{}:", kebab_key)).unwrap(),
-                    value,
-                ));
-            }
-        }
-        Ok(())
+        self.serialize_key(key)?;
+        self.serialize_value(value)
     }
 
     fn end(self) -> Result<Expr> {
         let mut ret = Seq(Vec::new());
         for (key, value) in self.values.into_iter() {
-            ret.push(Tuple(vec![key, value]));
+            ret.push(MapElement(vec![key, value]));
         }
         // Put contents after all the entries if there was one
         if !self.contents.is_none() {
