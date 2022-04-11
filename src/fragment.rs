@@ -239,8 +239,8 @@ impl<'a> Item<'a> {
 
         // Strip indentation when putting it in headline.
         // Must always have at least one headline when parsing a block.
-        let head = if line.is_empty() {
-            line
+        let head = if line.chars().all(CharExt::is_idm_whitespace) {
+            ""
         } else {
             &line[indent.len()..]
         };
