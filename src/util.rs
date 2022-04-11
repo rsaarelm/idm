@@ -1,4 +1,4 @@
-use crate::Style;
+use crate::{parse::CharExt, Style};
 use serde::{de::DeserializeOwned, Serialize};
 
 /// Like `guess_indent_style`, but returns `None` if input does not clearly
@@ -10,7 +10,7 @@ pub fn infer_indent_style(input: &str) -> Option<Style> {
         if c == '\n' {
             at_line_start = true;
             continue;
-        } else if !c.is_whitespace() {
+        } else if !c.is_idm_whitespace() {
             if !prefix.is_empty() {
                 // Got what we wanted.
                 break;
@@ -19,7 +19,7 @@ pub fn infer_indent_style(input: &str) -> Option<Style> {
             }
         }
 
-        if at_line_start && c.is_whitespace() {
+        if at_line_start && c.is_idm_whitespace() {
             prefix.push(c);
         }
     }
