@@ -17,7 +17,7 @@ pub fn to_string_styled<T: ser::Serialize>(
 ) -> Result<String> {
     let mut serializer = Serializer::default();
     let expr = value.serialize(&mut serializer)?;
-    Ok(format!("{}", Formatted(style, expr)))
+    Ok(Formatted(style, expr).to_string())
 }
 
 /// Serialize a value using indentation style inferred from an existing
@@ -93,7 +93,7 @@ impl Value {
     }
 
     fn from<T: fmt::Display>(item: T) -> Result<Value> {
-        Value::new(format!("{}", item))
+        Value::new(item.to_string())
     }
 
     fn as_str(&self) -> &str {
