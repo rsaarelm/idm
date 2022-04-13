@@ -17,7 +17,9 @@ mod ser;
 pub use ser::{to_string, to_string_styled, to_string_styled_like, Style};
 
 mod util;
-pub use util::{guess_indent_style, infer_indent_style, transmute};
+pub use util::{
+    guess_indent_style, infer_indent_style, transmute, DefaultDash,
+};
 
 /*
  // FIXME: Rewrite README

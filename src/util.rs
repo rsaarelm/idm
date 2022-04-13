@@ -1,5 +1,11 @@
+use std::{
+    fmt::Display,
+    ops::{Deref, DerefMut},
+    str::FromStr,
+};
+
 use crate::{parse::CharExt, Style};
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{de, de::DeserializeOwned, ser, Deserialize, Serialize};
 
 /// Like `guess_indent_style`, but returns `None` if input does not clearly
 /// specify an indent style.
@@ -48,6 +54,74 @@ pub fn guess_indent_style(input: &str) -> Style {
 pub fn transmute<T: Serialize, U: DeserializeOwned>(e: &T) -> crate::Result<U> {
     let s = crate::to_string(e)?;
     crate::from_str(&s)
+}
+
+/// Wrapper that represents `Default` values with `"-"`, allowing them in
+/// contexts that cannot represent an empty value.
+///
+/// ```
+/// use idm::DefaultDash;
+///
+/// assert_eq!(idm::from_str::<DefaultDash<String>>("-").unwrap(), DefaultDash(String::default()));
+/// assert_eq!(idm::from_str::<DefaultDash<String>>("xyzzy").unwrap(), DefaultDash("xyzzy".to_string()));
+///
+/// assert_eq!(idm::to_string(&DefaultDash("xyzzy".to_string())).unwrap().trim(), "xyzzy");
+/// assert_eq!(idm::to_string(&DefaultDash(String::default())).unwrap().trim(), "-");
+/// // Cannot serialize an actual "-".
+/// assert!(idm::to_string(&DefaultDash("-".to_string())).is_err());
+/// ```
+#[derive(Clone, Copy, Default, Eq, PartialEq, Hash, Ord, PartialOrd, Debug)]
+pub struct DefaultDash<T: Default>(pub T);
+
+impl<'de, E: Display, T: FromStr<Err = E> + Default> Deserialize<'de>
+    for DefaultDash<T>
+{
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let ret = String::deserialize(deserializer)?;
+        if ret == "-" {
+            Ok(DefaultDash(Default::default()))
+        } else {
+            T::from_str(&ret)
+                .map(DefaultDash)
+                .map_err(de::Error::custom)
+        }
+    }
+}
+
+impl<T: Display + Default + PartialEq> Serialize for DefaultDash<T> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        if self.0 == Default::default() {
+            "-".serialize(serializer)
+        } else {
+            let s = self.0.to_string();
+            if s == "-" {
+                return Err(ser::Error::custom(
+                    "DefaultDash inner type serializes as dash",
+                ));
+            }
+            s.serialize(serializer)
+        }
+    }
+}
+
+impl<T: Default> Deref for DefaultDash<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<T: Default> DerefMut for DefaultDash<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
 }
 
 #[cfg(test)]
