@@ -100,10 +100,10 @@ fn simple_sequence() {
     // Test inline fragments.
     test!(
         &vec![s("foo"), s("bar"), s("baz")],
-        "foo\nbar\nbaz",
-        "foo bar baz"
+        "foo bar baz",
+        "foo\nbar\nbaz"
     );
-    test!(&vec![1, 2, 3], "1\n2\n3", "1 2 3");
+    test!(&vec![1, 2, 3], "1 2 3", "1\n2\n3");
 }
 
 #[test]

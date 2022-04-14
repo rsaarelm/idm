@@ -310,7 +310,11 @@ struct Formatted(Style, Expr);
 impl fmt::Display for Formatted {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let Formatted(ref style, ref expr) = self;
-        style.expr_outline(f, 0, false, expr)
+        if expr.can_be_inlined() {
+            style.expr_inline(f, expr)
+        } else {
+            style.expr_outline(f, 0, false, expr)
+        }
     }
 }
 
