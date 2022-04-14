@@ -1037,6 +1037,62 @@ Title
     );
 }
 
+#[test]
+fn test_serialize_data_outline() {
+    assert_eq!(to_string(&DataOutline::default()).unwrap(), "");
+
+    assert_eq!(
+        to_string(&DataOutline(vec![(s("A"), Default::default())])).unwrap(),
+        "A\n"
+    );
+
+    assert_eq!(
+        to_string(&DataOutline(vec![(
+            s("A"),
+            (
+                vec![(s("x"), s("1"))].into_iter().collect(),
+                Default::default(),
+            )
+        )]))
+        .unwrap(),
+        "\
+A
+  :x 1
+"
+    );
+
+    assert_eq!(
+        to_string(&DataOutline(vec![(
+            s("A"),
+            (
+                Default::default(),
+                DataOutline(vec![(s("B"), Default::default())])
+            )
+        )]))
+        .unwrap(),
+        "\
+A
+  B
+"
+    );
+
+    assert_eq!(
+        to_string(&DataOutline(vec![(
+            s("A"),
+            (
+                vec![(s("x"), s("1"))].into_iter().collect(),
+                DataOutline(vec![(s("B"), Default::default())])
+            )
+        )]))
+        .unwrap(),
+        "\
+A
+  :x 1
+  B
+"
+    );
+}
+
 ////////////////////////////////
 // Helper functions
 

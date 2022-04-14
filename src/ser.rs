@@ -297,7 +297,7 @@ impl Expr {
 
     fn is_empty(&self) -> bool {
         matches!(self, Expr::None)
-            || matches!(self, MapElement(es) | Seq(es) | Pair(es) if es.is_empty())
+            || matches!(self, MapElement(es) | Seq(es) | Pair(es) if es.iter().all(|e| e.is_empty()))
     }
 
     fn is_blank_line(&self) -> bool {
@@ -430,8 +430,11 @@ impl Style {
             Expr::None => Ok(()),
             e if e.is_blank_line() => writeln!(f),
             Atom(v) => self.value_outline(f, depth, v),
+            Pair(_) if expr.is_empty() => Ok(()),
             Seq(es) | MapElement(es) | Pair(es) => {
-                if expr.is_line_or_section() {
+                let empty_pair_head = matches!(expr, Pair(_))
+                    && es.iter().next().map_or(false, |e| e.is_empty());
+                if expr.is_line_or_section() && !empty_pair_head {
                     match es.as_slice() {
                         [head, body] => {
                             if !head.is_blank_line() {
@@ -466,6 +469,10 @@ impl Style {
                         {
                             was_adorned = true;
                             special = Special::Adorn;
+                            if e.is_empty() {
+                                // Avoid emitting an extra blank line.
+                                continue;
+                            }
                         } else if i == 1 && was_adorned {
                             special = Special::Flatten;
                         } else {

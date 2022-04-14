@@ -1,11 +1,11 @@
-use crate::{parse, parser::Parser, Error, Result};
+use crate::{parser::Parser, Error, Result};
 use serde::de;
 
 pub fn from_str<'a, T>(input: &'a str) -> crate::Result<T>
 where
     T: de::Deserialize<'a>,
 {
-    T::deserialize(&mut Deserializer::from_str(parse::smart_trim_end(input))?)
+    T::deserialize(&mut Deserializer::from_str(input)?)
 }
 
 pub type Deserializer<'de> = Parser<'de>;

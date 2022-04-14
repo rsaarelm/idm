@@ -49,32 +49,6 @@ pub fn line(input: &str) -> ParseResult<&str> {
         .unwrap_or(Ok((input, "")))
 }
 
-/// Like str::trim_end, but retain content up to and including the first
-/// newline after the end of non-whitespace content if such newline exists.
-///
-/// This is needed to maintain the separation between newline-less single-line
-/// fragments and single line outlines with the newline in IDM input.
-pub fn smart_trim_end(input: &str) -> &str {
-    let mut first_ending_newline = None;
-    let len = input.len();
-    for (i, c) in input.chars().rev().enumerate() {
-        if c == '\n' {
-            first_ending_newline = Some(len - i);
-        }
-        if !c.is_whitespace() {
-            break;
-        }
-    }
-
-    if let Some(i) = first_ending_newline {
-        // Trim whitespace past the last newline.
-        &input[..i]
-    } else {
-        // No newlines after content, trim everything.
-        input.trim_end()
-    }
-}
-
 /// Indentation for any line.
 ///
 /// If the line is blank and `line_indent` would return `None`, use the
