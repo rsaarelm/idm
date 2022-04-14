@@ -1,10 +1,6 @@
-use std::{
-    fmt::Display,
-    ops::{Deref, DerefMut},
-    str::FromStr,
-};
+use std::ops::{Deref, DerefMut};
 
-use crate::{parse::CharExt, Style};
+use crate::{from_str, parse::CharExt, to_string, Style};
 use serde::{de, de::DeserializeOwned, ser, Deserialize, Serialize};
 
 /// Like `guess_indent_style`, but returns `None` if input does not clearly
@@ -62,20 +58,28 @@ pub fn transmute<T: Serialize, U: DeserializeOwned>(e: &T) -> crate::Result<U> {
 /// ```
 /// use idm::DefaultDash;
 ///
-/// assert_eq!(idm::from_str::<DefaultDash<String>>("-").unwrap(), DefaultDash(String::default()));
-/// assert_eq!(idm::from_str::<DefaultDash<String>>("xyzzy").unwrap(), DefaultDash("xyzzy".to_string()));
+/// assert_eq!(
+///     idm::from_str::<DefaultDash<String>>("-").unwrap(),
+///     DefaultDash(String::default())
+/// );
+/// assert_eq!(
+///     idm::from_str::<DefaultDash<String>>("xyzzy").unwrap(),
+///     DefaultDash("xyzzy".to_string())
+/// );
 ///
-/// assert_eq!(idm::to_string(&DefaultDash("xyzzy".to_string())).unwrap().trim(), "xyzzy");
-/// assert_eq!(idm::to_string(&DefaultDash(String::default())).unwrap().trim(), "-");
-/// // Cannot serialize an actual "-".
-/// assert!(idm::to_string(&DefaultDash("-".to_string())).is_err());
+/// assert_eq!(
+///     idm::to_string(&DefaultDash("xyzzy".to_string())).unwrap(),
+///     "xyzzy"
+/// );
+/// assert_eq!(
+///     idm::to_string(&DefaultDash(String::default())).unwrap(),
+///     "-"
+/// );
 /// ```
-#[derive(Clone, Copy, Default, Eq, PartialEq, Hash, Ord, PartialOrd, Debug)]
+#[derive(Copy, Clone, Default, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
 pub struct DefaultDash<T: Default>(pub T);
 
-impl<'de, E: Display, T: FromStr<Err = E> + Default> Deserialize<'de>
-    for DefaultDash<T>
-{
+impl<'de, T: DeserializeOwned + Default> Deserialize<'de> for DefaultDash<T> {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
@@ -84,14 +88,12 @@ impl<'de, E: Display, T: FromStr<Err = E> + Default> Deserialize<'de>
         if ret == "-" {
             Ok(DefaultDash(Default::default()))
         } else {
-            T::from_str(&ret)
-                .map(DefaultDash)
-                .map_err(de::Error::custom)
+            from_str(&ret).map(DefaultDash).map_err(de::Error::custom)
         }
     }
 }
 
-impl<T: Display + Default + PartialEq> Serialize for DefaultDash<T> {
+impl<T: Serialize + Default + PartialEq> Serialize for DefaultDash<T> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
@@ -99,13 +101,11 @@ impl<T: Display + Default + PartialEq> Serialize for DefaultDash<T> {
         if self.0 == Default::default() {
             "-".serialize(serializer)
         } else {
-            let s = self.0.to_string();
-            if s == "-" {
-                return Err(ser::Error::custom(
-                    "DefaultDash inner type serializes as dash",
-                ));
-            }
-            s.serialize(serializer)
+            // XXX: It's up to the user to worry about non-default values of
+            // the type serializing as a literal "-". Could serialize to
+            // string here, error out on "-" and reserialize the string
+            // otherwise, but this is simpler and probably faster.
+            self.0.serialize(serializer)
         }
     }
 }
@@ -121,6 +121,60 @@ impl<T: Default> Deref for DefaultDash<T> {
 impl<T: Default> DerefMut for DefaultDash<T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
+    }
+}
+
+/// Wrapper that merges two word-like elements into a single word-like element
+/// with a connecting colon.
+///
+/// ```
+/// use idm::ColonPair;
+///
+/// assert_eq!(
+///     idm::from_str::<ColonPair<String, String>>("a:b").unwrap(),
+///     ColonPair("a".to_string(), "b".to_string())
+/// );
+/// assert_eq!(
+///     idm::to_string(&ColonPair("x".to_string(), "y".to_string())).unwrap(),
+///     "x:y"
+/// );
+/// ```
+#[derive(Copy, Clone, Default, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
+pub struct ColonPair<T, U>(pub T, pub U);
+
+impl<'de, T: DeserializeOwned, U: DeserializeOwned> Deserialize<'de>
+    for ColonPair<T, U>
+{
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let ret = String::deserialize(deserializer)?;
+        if let Some((head, tail)) = ret.split_once(':') {
+            let head = from_str(&head).map_err(de::Error::custom)?;
+            let tail = from_str(&tail).map_err(de::Error::custom)?;
+            Ok(ColonPair(head, tail))
+        } else {
+            Err(de::Error::custom("No colon found in value"))
+        }
+    }
+}
+
+impl<T: Serialize, U: Serialize> Serialize for ColonPair<T, U> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let head = to_string(&self.0).map_err(ser::Error::custom)?;
+        let tail = to_string(&self.1).map_err(ser::Error::custom)?;
+        if head.chars().any(|c| c.is_idm_whitespace() || c == ':')
+            || tail.chars().any(|c| c.is_idm_whitespace())
+        {
+            return Err(ser::Error::custom(
+                "ColonPair: halves are not words or head contains a colon",
+            ));
+        }
+        format!("{}:{}", head, tail).serialize(serializer)
     }
 }
 
