@@ -22,12 +22,9 @@ pub use util::{
     DefaultDash, UnderlineSpaces,
 };
 
-/*
- // FIXME: Rewrite README
 #[cfg(doctest)]
 #[doc = include_str!("../README.md")]
 pub struct ReadmeDoctests;
-*/
 
 #[cfg(test)]
 mod tests;
