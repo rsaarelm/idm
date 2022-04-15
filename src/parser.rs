@@ -266,7 +266,11 @@ impl<'a> State<'a> {
                 ret = Ok(State::MapKey(Default::default()));
                 Default::default()
             }
-            State::Document(Fragment::Outline(o)) => {
+            State::Document(Fragment::Outline(mut o)) => {
+                // Sugar hack, if the outline consists entirely of a
+                // single colon-indented block, drop down into that.
+                // This will be done a lot in enter_map and enter_struct.
+                o.try_unfold_only_child_outline();
                 ret = Ok(State::MapKey(o));
                 Default::default()
             }
@@ -281,18 +285,7 @@ impl<'a> State<'a> {
 
                 match o.pop_nonblank() {
                     Some(Fragment::Outline(mut a)) => {
-                        // Sugar hack, if the outline consists entirely of a
-                        // single colon-indented block, drop down into that.
-                        {
-                            let mut b = a.clone();
-                            let b_elt = b.pop_nonblank();
-                            if let Some(Fragment::Outline(b_elt)) = b_elt {
-                                // no further stuff.
-                                if b.pop_nonblank().is_none() {
-                                    a = b_elt;
-                                }
-                            }
-                        }
+                        a.try_unfold_only_child_outline();
 
                         // Nested block, that's a map.
                         ret = Ok(State::MapKey(a));
@@ -341,20 +334,10 @@ impl<'a> State<'a> {
             }
             State::MapValue(mut o) => {
                 match o.pop() {
-                    Some(mut i) if !i.is_line() => {
+                    Some(i) if !i.is_line() => {
                         let mut val = i.body.clone();
 
-                        // Sugar hack, if the outline consists entirely of a
-                        // single colon-indented block, drop down into that.
-                        {
-                            let b_elt = i.body.pop_nonblank();
-                            if let Some(Fragment::Outline(b_elt)) = b_elt {
-                                // no further stuff.
-                                if i.body.pop_nonblank().is_none() {
-                                    val = b_elt;
-                                }
-                            }
-                        }
+                        val.try_unfold_only_child_outline();
 
                         // Vertical sequence from body of section (head was
                         // key)
@@ -373,7 +356,8 @@ impl<'a> State<'a> {
                     }
                 }
             }
-            State::PairSecond(o) => {
+            State::PairSecond(mut o) => {
+                o.try_unfold_only_child_outline();
                 ret = Ok(State::MapKey(o));
                 Default::default()
             }
@@ -400,7 +384,9 @@ impl<'a> State<'a> {
                 ret = Ok(State::MapKey(Default::default()));
                 Default::default()
             }
-            State::Document(Fragment::Outline(o)) => {
+            State::Document(Fragment::Outline(mut o)) => {
+                o.try_unfold_only_child_outline();
+
                 ret = Ok(State::MapKey(o));
                 Default::default()
             }
@@ -418,18 +404,7 @@ impl<'a> State<'a> {
             State::Sequence(mut o) => {
                 match o.pop_nonblank() {
                     Some(Fragment::Outline(mut a)) => {
-                        // Sugar hack, if the outline consists entirely of a
-                        // single colon-indented block, drop down into that.
-                        {
-                            let mut b = a.clone();
-                            let b_elt = b.pop_nonblank();
-                            if let Some(Fragment::Outline(b_elt)) = b_elt {
-                                // no further stuff.
-                                if b.pop_nonblank().is_none() {
-                                    a = b_elt;
-                                }
-                            }
-                        }
+                        a.try_unfold_only_child_outline();
 
                         // Nested block, like a map.
                         ret = Ok(State::MapKey(a));
@@ -485,20 +460,10 @@ impl<'a> State<'a> {
             }
             State::MapValue(mut o) => {
                 match o.pop() {
-                    Some(mut i) if !i.is_line() => {
+                    Some(i) if !i.is_line() => {
                         let mut val = i.body.clone();
 
-                        // Sugar hack, if the outline consists entirely of a
-                        // single colon-indented block, drop down into that.
-                        {
-                            let b_elt = i.body.pop_nonblank();
-                            if let Some(Fragment::Outline(b_elt)) = b_elt {
-                                // no further stuff.
-                                if i.body.pop_nonblank().is_none() {
-                                    val = b_elt;
-                                }
-                            }
-                        }
+                        val.try_unfold_only_child_outline();
 
                         // Vertical sequence from body of section (head was
                         // key)
@@ -523,7 +488,8 @@ impl<'a> State<'a> {
                     }
                 }
             }
-            State::PairSecond(o) => {
+            State::PairSecond(mut o) => {
+                o.try_unfold_only_child_outline();
                 ret = Ok(State::MapKey(o));
                 Default::default()
             }

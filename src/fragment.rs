@@ -207,6 +207,26 @@ impl<'a> Outline<'a> {
     pub fn is_empty_or_blank(&self) -> bool {
         self.0.iter().all(|i| i.is_comment() || i.is_blank())
     }
+
+    /// If this outline consists of a single outline child, replace this with
+    /// the child outline.
+    ///
+    /// This is an awkward method used by the awkward syntax exception that
+    /// allows you to use the `:attribute 123` naming style even when it's not
+    /// structurally warranted to keep up the charade that the colons are
+    /// actually part of attribute syntax.
+    pub(crate) fn try_unfold_only_child_outline(&mut self) {
+        let mut a = self.clone();
+
+        if let Some(Fragment::Outline(child)) = a.pop_nonblank() {
+            // There's an outline child...
+            if a.pop_nonblank().is_none() {
+                // ...and it's the only child.
+                // Replace self with it.
+                *self = child;
+            }
+        }
+    }
 }
 
 impl fmt::Display for Outline<'_> {

@@ -422,6 +422,10 @@ name-text Foo bar
 x 1
 y 2",
         "\
+:name-text Foo bar
+:x 1
+:y 2",
+        "\
 -- Comment at start.
 name-text Foo bar
 x 1
@@ -544,7 +548,7 @@ fn map_structs() {
     }
 
     test!(
-        &BTreeMap::from_iter(vec![
+        &BTreeMap::from([
             (s("one"), Simple { x: 3, y: 4 }),
             (s("two"), Simple { x: 5, y: 6 }),
         ]),
@@ -555,6 +559,14 @@ one
 two
   x 5
   y 6",
+        // Inline struct values
+        "\
+one 3 4
+two 5 6",
+        // Toplevel colon sugar
+        "\
+:one 3 4
+:two 5 6"
     );
 }
 
@@ -670,6 +682,10 @@ fn oneshot_section() {
 Headline
   x 1
   y 2",
+        "\
+Headline
+  :x 1
+  :y 2"
     );
 }
 
