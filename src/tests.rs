@@ -1033,6 +1033,11 @@ fn test_data_outline() {
         "\
 Title
   :attr 123
+  Subpage",
+        "\
+Title
+  -- 'Normal form' of head map, using a comment to mark it
+    attr 123
   Subpage"
     );
 }
