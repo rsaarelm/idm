@@ -1029,6 +1029,34 @@ xyzzy 5"
     );
 }
 
+#[test]
+fn colon_variations() {
+    type StringMap = IndexMap<String, String>;
+
+    // Valid colon block, non-whitespace character touching colon.
+    test!(
+        &(StringMap::from([(s("valid"), s("1"))]), s("Text")),
+        "\
+:valid 1
+Text"
+    );
+
+    // Invalid ones, treated as text.
+    test!(
+        &(StringMap::default(), s(": invalid 2\nText")),
+        "\
+: invalid 2
+Text"
+    );
+
+    test!(
+        &(StringMap::default(), s(":\nText")),
+        "\
+:
+Text"
+    );
+}
+
 #[derive(PartialEq, Default, Debug, Serialize, Deserialize)]
 struct DataOutline(Vec<(String, (IndexMap<String, String>, DataOutline))>);
 

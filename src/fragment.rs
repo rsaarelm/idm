@@ -171,7 +171,7 @@ impl<'a> Outline<'a> {
                 // Skip blanks.
                 self.0.pop();
                 continue;
-            } else if self.0[top].head.starts_with(':') {
+            } else if self.0[top].is_colon_item() {
                 // Coloned element, accumulate into colon block.
                 //
                 // Remove the colon (and any whitespace between colon and
@@ -324,6 +324,16 @@ impl<'a> Item<'a> {
 
     pub fn is_blank(&self) -> bool {
         self.is_line() && self.head.chars().all(CharExt::is_idm_whitespace)
+    }
+
+    pub fn is_colon_item(&self) -> bool {
+        // Must be a colon followed immediately by a non-whitespace element.
+        self.head.starts_with(':')
+            && self
+                .head
+                .chars()
+                .nth(1)
+                .map_or(false, |c| !c.is_idm_whitespace())
     }
 }
 
