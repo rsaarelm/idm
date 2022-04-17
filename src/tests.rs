@@ -53,6 +53,12 @@ fn atom() {
 }
 
 #[test]
+fn nbsp_is_not_whitespace() {
+    test!(&s("\u{00a0}"), "\u{00a0}");
+    test!(&vec![s("a\u{00a0}b")], "a\u{00a0}b");
+}
+
+#[test]
 fn primitives() {
     test!(&-128i8, "-128");
     test!(&255u8, "255");

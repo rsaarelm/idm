@@ -1,4 +1,4 @@
-use crate::{err, guess_indent_style, Error, Result};
+use crate::{err, guess_indent_style, parse::CharExt, Error, Result};
 use serde::{
     ser::{self, SerializeMap},
     Serialize,
@@ -60,7 +60,10 @@ impl fmt::Display for Value {
 
 impl Value {
     pub fn new(text: impl AsRef<str>) -> Result<Value> {
-        let text = text.as_ref().trim_end().to_string();
+        let text = text
+            .as_ref()
+            .trim_end_matches(CharExt::is_idm_whitespace)
+            .to_string();
 
         if text.is_empty() {
             return err!("Empty string for value");
@@ -69,7 +72,7 @@ impl Value {
         let mut newline = false;
         let mut space = false;
         for c in text.chars() {
-            if c.is_whitespace() {
+            if c.is_idm_whitespace() {
                 space = true;
             }
             if c == '\n' {
@@ -113,13 +116,14 @@ impl Value {
                 .unwrap()
                 .chars()
                 .next()
-                .map_or(true, |c| !c.is_whitespace()));
+                .map_or(true, |c| !c.is_idm_whitespace()));
 
             // TODO: String literal formatter in construction that actually
             // validates this stuff and errors out early if you try to feed
             // invalid strings.
             for line in s.lines().skip(1) {
-                if !line.chars().next().map_or(true, |c| c.is_whitespace()) {
+                if !line.chars().next().map_or(true, |c| c.is_idm_whitespace())
+                {
                     // A line after the first one was not indented so this
                     // value can not pass as a section.
                     return false;
@@ -133,7 +137,7 @@ impl Value {
     }
 
     fn is_blank_line(&self) -> bool {
-        matches!(self, Paragraph(s) if s.trim() == "")
+        matches!(self, Paragraph(s) if s.trim_matches(CharExt::is_idm_whitespace) == "")
     }
 }
 
@@ -176,7 +180,7 @@ impl Default for Expr {
 impl Expr {
     fn from<T: fmt::Display>(item: T) -> Result<Expr> {
         let s = format!("{}", item);
-        if s.trim_end().is_empty() {
+        if s.trim_end_matches(CharExt::is_idm_whitespace).is_empty() {
             Ok(Expr::None)
         } else {
             Ok(Atom(Value::from(item)?))
@@ -384,7 +388,8 @@ impl Style {
             }
             Paragraph(s) => {
                 for line in s.lines() {
-                    if line.trim().is_empty() {
+                    if line.trim_matches(CharExt::is_idm_whitespace).is_empty()
+                    {
                         // Don't indent empty lines.
                         writeln!(f)?;
                     } else {
@@ -613,6 +618,8 @@ impl<'a> ser::Serializer for &'a mut Serializer {
     }
 
     fn serialize_char(self, v: char) -> Result<Expr> {
+        // Going to disallow any whitespace, not just IDM ASCII ones here for
+        // clarity's sake.
         if v.is_whitespace() {
             return err!("Can't serialize whitespace chars");
         }
@@ -621,7 +628,7 @@ impl<'a> ser::Serializer for &'a mut Serializer {
     }
 
     fn serialize_str(self, v: &str) -> Result<Expr> {
-        if v.trim_end().is_empty() {
+        if v.trim_end_matches(CharExt::is_idm_whitespace).is_empty() {
             Ok(Atom(Value::empty_line()))
         } else {
             Expr::from(v)

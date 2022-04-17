@@ -1,4 +1,4 @@
-use crate::{parser::Parser, Error, Result};
+use crate::{parse::CharExt, parser::Parser, Error, Result};
 use serde::de;
 
 pub fn from_str<'a, T>(input: &'a str) -> crate::Result<T>
@@ -108,7 +108,10 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
     where
         V: de::Visitor<'de>,
     {
-        visitor.visit_str(self.read_str()?.trim_end())
+        visitor.visit_str(
+            self.read_str()?
+                .trim_end_matches(CharExt::is_idm_whitespace),
+        )
     }
 
     fn deserialize_string<V>(self, visitor: V) -> Result<V::Value>
