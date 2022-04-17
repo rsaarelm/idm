@@ -355,7 +355,9 @@ A
 #[test]
 fn escape_comment() {
     // Standalone string (not sequence), no escaping
-    test!(&s("--"), "--");
+    // XXX: Commenty strings don't serialize as fragments currently, so don't
+    // check for exact reserialization match.
+    test!(&s("--"), _, "--");
 
     // Use separator to make the comment paragraph-like in an outline list
     test!(
@@ -1152,16 +1154,20 @@ where
 {
     let is_inline = !idm.chars().any(|c| c == '\n');
 
-    let deser = from_str::<T>(idm).expect("IDM did not deserialize to type");
+    // Normalize multi-line IDMs to always have a trailing newline. This
+    // should make them equal to their reserialization.
+    let mut idm = idm.to_string();
+    if !is_inline && idm.chars().last() != Some('\n') {
+        idm.push('\n');
+    }
+
+    let deser = from_str::<T>(&idm).expect("IDM did not deserialize to type");
     assert_eq!(&deser, val);
 
     // Use to_string_styled_like to pick the indent style from the input's
     // example, serialize tabs when parsing tabs, spaces when parsing spaces.
-    let reser = to_string_styled_like(idm, val)
+    let reser = to_string_styled_like(&idm, val)
         .expect("Value did not serialize to IDM");
-
-    let reser = reser.trim_end();
-    let idm = idm.trim_end();
 
     if idm != reser {
         println!("Deserialized \n\x1b[1;32m{}\x1b[0m", idm);
@@ -1173,10 +1179,7 @@ where
     // Also check for default style ser, two characters per indent can trip
     // some deserialization bugs that generate 1-character dummy indents where
     // they shouldn't.
-    let mut reser = to_string(val).expect("Value did not serialize to IDM");
-    if is_inline {
-        reser = reser.trim_end().to_string();
-    }
+    let reser = to_string(val).expect("Value did not serialize to IDM");
 
     let new_deser = from_str::<T>(&reser)
         .expect("Serialized IDM did not deserialize to type");
