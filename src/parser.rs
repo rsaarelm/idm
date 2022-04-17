@@ -328,6 +328,24 @@ impl<'a> State<'a> {
                 }
             }
 
+            State::PairFirst(Fragment::Item(i)) => {
+                // Synthesize an outline.
+                let outline = Outline(vec![i]);
+                if let Some(Fragment::Outline(a)) =
+                    outline.clone().pop_nonblank()
+                {
+                    // The single item in it looks like a map, go read it as
+                    // one.
+                    ret = Ok(State::MapKey(a));
+                    State::PairSecond(Default::default())
+                } else {
+                    // Nothing map-like in sight, pass an empty map and read
+                    // the content as the tail of the pair.
+                    ret = Ok(State::MapKey(Default::default()));
+                    State::PairSecond(outline)
+                }
+            }
+
             State::MapKey(_) => {
                 ret = err!("Not supported");
                 s
@@ -362,9 +380,7 @@ impl<'a> State<'a> {
                 Default::default()
             }
 
-            State::Words(_)
-            | State::InlineStruct { .. }
-            | State::PairFirst(Fragment::Item(_)) => s,
+            State::Words(_) | State::InlineStruct { .. } => s,
         });
 
         ret
