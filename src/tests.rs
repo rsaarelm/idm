@@ -1060,22 +1060,46 @@ Text"
 }
 
 #[derive(PartialEq, Default, Debug, Serialize, Deserialize)]
-struct DataOutline(Vec<(String, (IndexMap<String, String>, DataOutline))>);
+struct DataOutline((IndexMap<String, String>, Vec<(String, DataOutline)>));
 
 #[test]
 fn test_data_outline() {
     test!(&DataOutline::default(), "");
 
-    test!(&DataOutline(vec![(s("A"), Default::default())]), "A\n");
+    test!(
+        &DataOutline((Default::default(), vec![(s("A"), Default::default())])),
+        "A\n"
+    );
 
     test!(
-        &DataOutline(vec![(
-            s("Title"),
-            (
-                vec![(s("attr"), s("123"))].into_iter().collect(),
-                DataOutline(vec![(s("Subpage"), Default::default())])
-            )
-        )]),
+        &DataOutline((
+            IndexMap::from([(s("message"), s("Hello"))]),
+            Default::default()
+        )),
+        ":message Hello\n"
+    );
+
+    test!(
+        &DataOutline((
+            IndexMap::from([(s("message"), s("Hello"))]),
+            vec![(s("A"), Default::default())]
+        )),
+        "\
+:message Hello
+A"
+    );
+
+    test!(
+        &DataOutline((
+            Default::default(),
+            vec![(
+                s("Title"),
+                DataOutline((
+                    IndexMap::from([(s("attr"), s("123"))]),
+                    vec![(s("Subpage"), Default::default())]
+                ))
+            )]
+        )),
         "\
 Title
   :attr 123
@@ -1085,62 +1109,6 @@ Title
   -- 'Normal form' of head map, using a comment to mark it
     attr 123
   Subpage"
-    );
-}
-
-#[test]
-fn test_serialize_data_outline() {
-    assert_eq!(to_string(&DataOutline::default()).unwrap(), "");
-
-    assert_eq!(
-        to_string(&DataOutline(vec![(s("A"), Default::default())])).unwrap(),
-        "A\n"
-    );
-
-    assert_eq!(
-        to_string(&DataOutline(vec![(
-            s("A"),
-            (
-                vec![(s("x"), s("1"))].into_iter().collect(),
-                Default::default(),
-            )
-        )]))
-        .unwrap(),
-        "\
-A
-  :x 1
-"
-    );
-
-    assert_eq!(
-        to_string(&DataOutline(vec![(
-            s("A"),
-            (
-                Default::default(),
-                DataOutline(vec![(s("B"), Default::default())])
-            )
-        )]))
-        .unwrap(),
-        "\
-A
-  B
-"
-    );
-
-    assert_eq!(
-        to_string(&DataOutline(vec![(
-            s("A"),
-            (
-                vec![(s("x"), s("1"))].into_iter().collect(),
-                DataOutline(vec![(s("B"), Default::default())])
-            )
-        )]))
-        .unwrap(),
-        "\
-A
-  :x 1
-  B
-"
     );
 }
 

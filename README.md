@@ -294,8 +294,12 @@ each item:
 ```rust
 use indexmap::IndexMap;
 
-struct DataOutline(Vec<(String, (IndexMap<String, String>, DataOutline))>);
+struct DataOutline((IndexMap<String, String>, Vec<(String, DataOutline)>));
 ```
+
+(The structural pair type needs to be a plain tuple inside the struct, struct
+tuples are reserved for data-like elements that do not trigger the structural
+parsing modes.)
 
 You can now read the named attributes from any item in the outline. The values
 will all be strings, but an application which knows the expected type for a
@@ -307,7 +311,7 @@ use indexmap::IndexMap;
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
-struct DataOutline(Vec<(String, (IndexMap<String, String>, DataOutline))>);
+struct DataOutline((IndexMap<String, String>, Vec<(String, DataOutline)>));
 
 let outline = idm::from_str::<DataOutline>("\
 Example outline
@@ -316,9 +320,11 @@ Example outline
     This part has stuff
   Things").unwrap();
 
-// We're going to need a better selector API for these things.
-assert_eq!(outline.0[0].1.1.0[0].0, "Stuff");  // On the right track...
-let tags = &outline.0[0].1.1.0[0].1.0["tags"]; // Grab tags field.
+// Raw access patterns are pretty rough.
+// A proper app would need some sort of selection API here,
+// the explicit indexing gets very rough very fast.
+assert_eq!(outline.0.1[0].1.0.1[0].0, "Stuff");     // On the right track...
+let tags = &outline.0.1[0].1.0.1[0].1.0.0["tags"];  // Grab tags field.
 assert_eq!(tags, "foo bar");
 
 // Cast to a more appropriate format.
