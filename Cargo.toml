@@ -1,16 +1,17 @@
 [package]
-name = "idm"
-version = "0.3.0-dev"
-license = "MIT/Apache-2.0"
-keywords = ["parser", "serde", "serialization"]
-authors = ["Risto Saarelma <risto.saarelma@iki.fi>"]
 edition = "2021"
-description = "Implicit Data Markup"
-categories = ["encoding"]
-readme = "README.md"
-homepage = "https://github.com/rsaarelm/idm"
-repository = "https://github.com/rsaarelm/idm"
+name = "idm"
+version = "0.3.0"
+authors = ["Risto Saarelma <risto.saarelma@iki.fi>"]
 exclude = ["fuzz/", "githooks/", "shell.nix", "Justfile"]
+description = "Implicit Data Markup"
+homepage = "https://github.com/rsaarelm/idm"
+readme = "README.md"
+keywords = ["parser", "serde", "serialization"]
+categories = ["encoding"]
+license = "MIT/Apache-2.0"
+repository = "https://github.com/rsaarelm/idm"
+resolver = "2"
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }

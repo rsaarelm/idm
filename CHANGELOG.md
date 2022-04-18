@@ -8,7 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Additions
 - Enumeration type support
 
-## [0.3.0] - TBA
+## [0.3.0] - 2022-04-18
+### Additions
+- Horizontal struct support
+- Utility wrapper types that do two-way value transformations during
+  serialization, for example for allowing map-like inline values.
 ### Changes
 - Horizontal sequences can now show up at the parsing top level and are
   distinguished from vertical sequences by the input having no newlines.
@@ -27,10 +31,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Deserialization parser has been completely rewritten. New version is a
   stacked state machine that decomposes into easier-to-maintain individual
   state transitions instead of the previous monolithic parser.
-### Additions
-- Horizontal struct support
-- Utility wrapper types that do two-way value transformations during
-  serialization, for example for allowing map-like inline values.
 
 ## [0.2.0] - 2021-09-09
 ### Changes
