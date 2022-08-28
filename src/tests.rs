@@ -997,7 +997,7 @@ y: s("a"),
 */
 
 #[test]
-fn test_generic_attributes() {
+fn generic_attributes() {
     #[derive(PartialEq, Default, Debug, Serialize, Deserialize)]
     struct Partial {
         a: u32,
@@ -1069,7 +1069,7 @@ Text"
 struct DataOutline((IndexMap<String, String>, Vec<(String, DataOutline)>));
 
 #[test]
-fn test_data_outline() {
+fn data_outline() {
     test!(&DataOutline::default(), "");
 
     test!(

@@ -10,6 +10,11 @@ use crate::{
 
 /// Parsing states that carry context fragments and are stacked in the parser
 /// stack.
+///
+/// The implementation can be thought of as a two-dimensional table. The rows
+/// are the transition methods in `State` like `enter_seq` and `enter_map`.
+/// The columns are the behaviors of each method given the current value of
+/// `State` for the given transition method.
 #[derive(Clone, Debug)]
 enum State<'a> {
     /// Complete document

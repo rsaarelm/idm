@@ -1,7 +1,6 @@
 use std::fmt::{self, Write};
 
 use clap::Parser;
-use idm;
 use indexmap::IndexMap;
 use rouille::router;
 use serde::{Deserialize, Serialize};
