@@ -141,6 +141,8 @@ impl Value {
     }
 }
 
+// XXX Shouldn't Expr::MapElement and Expr::Pair be (Expr, Expr) instead of Vec<Expr>?
+
 /// Descriptor for an expression for a possibly structural value.
 #[derive(Eq, PartialEq, Clone, Debug)]
 enum Expr {
@@ -552,7 +554,7 @@ impl<'a> ser::Serializer for &'a mut Serializer {
     type SerializeSeq = SeqSerializer;
     type SerializeTuple = SeqSerializer;
     type SerializeTupleStruct = SeqSerializer;
-    type SerializeTupleVariant = Self;
+    type SerializeTupleVariant = SeqSerializer;
     type SerializeMap = MapSerializer;
     type SerializeStruct = MapSerializer;
     type SerializeStructVariant = MapSerializer;
@@ -646,9 +648,9 @@ impl<'a> ser::Serializer for &'a mut Serializer {
         self,
         _name: &'static str,
         _variant_index: u32,
-        _variant: &'static str,
+        variant: &'static str,
     ) -> Result<Expr> {
-        unimplemented!();
+        Expr::from(variant)
     }
 
     fn serialize_newtype_struct<T>(
@@ -666,13 +668,16 @@ impl<'a> ser::Serializer for &'a mut Serializer {
         self,
         _name: &'static str,
         _variant_index: u32,
-        _variant: &'static str,
-        _value: &T,
+        variant: &'static str,
+        value: &T,
     ) -> Result<Expr>
     where
         T: ?Sized + Serialize,
     {
-        unimplemented!();
+        Ok(MapElement(vec![
+            variant.serialize(&mut *self)?,
+            value.serialize(&mut *self)?,
+        ]))
     }
 
     fn serialize_seq(self, len: Option<usize>) -> Result<Self::SerializeSeq> {
@@ -698,10 +703,10 @@ impl<'a> ser::Serializer for &'a mut Serializer {
         self,
         _name: &'static str,
         _variant_index: u32,
-        _variant: &'static str,
-        _len: usize,
+        variant: &'static str,
+        len: usize,
     ) -> Result<Self::SerializeTupleVariant> {
-        unimplemented!();
+        Ok(SeqSerializer::new(len).enum_variant(variant))
     }
 
     fn serialize_map(self, _len: Option<usize>) -> Result<Self::SerializeMap> {
@@ -720,10 +725,10 @@ impl<'a> ser::Serializer for &'a mut Serializer {
         self,
         _name: &'static str,
         _variant_index: u32,
-        _variant: &'static str,
+        variant: &'static str,
         _len: usize,
     ) -> Result<Self::SerializeStructVariant> {
-        unimplemented!();
+        Ok(MapSerializer::default().enum_variant(variant))
     }
 }
 
@@ -733,16 +738,24 @@ struct SeqSerializer {
     is_pair: bool,
     /// Will contain the first item if this is an indent-style tuple.
     acc: Expr,
+    /// Name of the enum variant used by enum implementations.
+    enum_variant: Expr,
 }
 
 impl SeqSerializer {
-    pub fn is_pair(mut self) -> SeqSerializer {
+    pub fn new(_len: usize) -> Self {
+        Default::default()
+    }
+
+    pub fn is_pair(mut self) -> Self {
         self.is_pair = true;
         self
     }
 
-    pub fn new(_len: usize) -> SeqSerializer {
-        Default::default()
+    pub fn enum_variant(mut self, enum_variant: &str) -> Self {
+        self.enum_variant =
+            Expr::from(enum_variant).expect("Invalid enum variant name");
+        self
     }
 
     fn serialize_tuple_element<T>(&mut self, value: &T) -> Result<()>
@@ -819,25 +832,34 @@ impl<'a> ser::SerializeTupleStruct for SeqSerializer {
     }
 }
 
-impl<'a> ser::SerializeTupleVariant for &'a mut Serializer {
+impl<'a> ser::SerializeTupleVariant for SeqSerializer {
     type Ok = Expr;
     type Error = Error;
 
-    fn serialize_field<T>(&mut self, _value: &T) -> Result<()>
+    fn serialize_field<T>(&mut self, value: &T) -> Result<()>
     where
         T: ?Sized + Serialize,
     {
-        unimplemented!();
+        self.serialize_tuple_element(value)
     }
 
     fn end(self) -> Result<Expr> {
-        unimplemented!();
+        Ok(MapElement(vec![self.enum_variant, self.acc]))
     }
 }
 
 #[derive(Default)]
 struct MapSerializer {
     values: Vec<(Expr, Expr)>,
+    enum_variant: Expr,
+}
+
+impl MapSerializer {
+    pub fn enum_variant(mut self, enum_variant: &str) -> Self {
+        self.enum_variant =
+            Expr::from(enum_variant).expect("Invalid enum variant name");
+        self
+    }
 }
 
 impl<'a> ser::SerializeMap for MapSerializer {
@@ -921,6 +943,9 @@ impl<'a> ser::SerializeStructVariant for MapSerializer {
     }
 
     fn end(self) -> Result<Expr> {
-        ser::SerializeStruct::end(self)
+        Ok(MapElement(vec![
+            self.enum_variant.clone(),
+            ser::SerializeStruct::end(self)?,
+        ]))
     }
 }

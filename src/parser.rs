@@ -110,6 +110,18 @@ impl<'a> Parser<'a> {
         Ok(())
     }
 
+    /// Enter a non-unit enum value.
+    ///
+    /// Non-unit (newtype, tuple or struct) enum values have a similar syntax
+    /// as a single key-value pair in a map, with the variant name
+    /// corresponding to the key and the value to the value.
+    pub fn enter_nonunit_enum(&mut self) -> Result<()> {
+        let top = self.stack.len() - 1;
+        let new_top = self.stack[top].enter_nonunit_enum()?;
+        self.stack.push(new_top);
+        Ok(())
+    }
+
     /// Exit the current entered scope.
     ///
     /// The scope must not have any unparsed input (that would be returned by
@@ -135,6 +147,16 @@ impl<'a> Parser<'a> {
     /// out items.
     pub fn is_really_empty(&self) -> bool {
         self.stack[self.stack.len() - 1].is_really_empty()
+    }
+
+    /// Return if the current state is exactly one word
+    pub fn is_word(&self) -> bool {
+        // XXX: Calling next on the top item, whatever it is, can be very
+        // expensive. There is probably a smarter way to do this.
+        let mut head = self.stack[self.stack.len() - 1].clone();
+        let text = head.next().unwrap_or_else(|_| Cow::from(""));
+        let text = text.trim();
+        !text.is_empty() && !text.chars().any(|c| c.is_whitespace())
     }
 }
 
@@ -648,6 +670,44 @@ impl<'a> State<'a> {
             State::Words(_)
             | State::InlineStruct { .. }
             | State::PairFirst(Fragment::Item(_)) => s,
+        });
+
+        ret
+    }
+
+    fn enter_nonunit_enum(&mut self) -> Result<State<'a>> {
+        // Reuses map item machinery, but does not enter a structure.
+        let mut ret = err!("Invalid enum");
+
+        take_mut::take(self, |s| match s {
+            State::Document(f) if f.is_empty() => Default::default(),
+            State::Document(Fragment::Outline(o)) => {
+                ret = Ok(State::MapKey(o));
+                Default::default()
+            }
+            State::Document(Fragment::Item(i)) => {
+                // Synthesize a single-line outline, calling next() with the
+                // MapKey should split off the front word.
+                ret = Ok(State::MapKey(Outline(vec![i])));
+
+                Default::default()
+            }
+            State::Sequence(mut o) => {
+                match o.pop_nonblank() {
+                    // Only line or section items are valid, use same logic as
+                    // parsing maps.
+                    Some(Fragment::Item(i)) => {
+                        ret = Ok(State::MapKey(Outline(vec![i])));
+                        State::Sequence(o)
+                    }
+                    _ => Default::default(),
+                }
+            }
+            State::MapKey(_) => todo!(),
+            State::MapValue(_) => todo!(),
+            State::PairFirst(_) => todo!(),
+            State::PairSecond(_) => todo!(),
+            State::Words(_) | State::InlineStruct { .. } => s,
         });
 
         ret

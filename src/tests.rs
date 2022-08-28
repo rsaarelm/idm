@@ -1118,6 +1118,67 @@ Title
     );
 }
 
+#[derive(PartialEq, Debug, Serialize, Deserialize)]
+enum EnumVariants {
+    Unit,
+    Newtype(i32),
+    Tuple(i32, i32),
+    Struct { x: i32, y: i32 },
+}
+
+#[test]
+fn unit_enum() {
+    use EnumVariants::*;
+
+    test!(&Unit, "Unit", "Unit\n");
+
+    test!(
+        &vec![Unit, Unit, Unit],
+        "Unit Unit Unit",
+        "\
+Unit
+Unit
+Unit"
+    );
+}
+
+#[test]
+fn full_enum() {
+    use EnumVariants::*;
+
+    test!(
+        &vec![
+            Unit,
+            Newtype(1),
+            Tuple(2, 3),
+            // Make sure struct enum supports inline structs.
+            Struct { x: 4, y: 5 },
+        ],
+        "\
+Unit
+Newtype 1
+Tuple 2 3
+Struct
+  x 4
+  y 5",
+        "\
+Unit
+Newtype 1
+Tuple 2 3
+Struct
+  :x 4
+  :y 5",
+        "\
+Unit
+Newtype
+  1
+Tuple
+  2
+  3
+Struct 4 5"
+    );
+}
+
 ////////////////////////////////
 // Helper functions
 

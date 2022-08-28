@@ -1,5 +1,5 @@
-use crate::{parse::CharExt, parser::Parser, Error, Result};
-use serde::de;
+use crate::{err, parse::CharExt, parser::Parser, Error, Result};
+use serde::de::{self, IntoDeserializer};
 
 pub fn from_str<'a, T>(input: &'a str) -> crate::Result<T>
 where
@@ -251,12 +251,21 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
         self,
         _name: &'static str,
         _variants: &'static [&'static str],
-        _visitor: V,
+        visitor: V,
     ) -> Result<V::Value>
     where
         V: de::Visitor<'de>,
     {
-        todo!()
+        if self.is_word() {
+            // Only a single word, parse unit variant.
+            visitor.visit_enum(self.read_str()?.into_deserializer())
+        } else {
+            // Nonunit enums look similar to the key-value pairs of a map.
+            self.enter_nonunit_enum()?;
+            let ret = visitor.visit_enum(Enum::new(self))?;
+            self.exit()?;
+            Ok(ret)
+        }
     }
 }
 
@@ -320,5 +329,63 @@ impl<'a, 'de> de::MapAccess<'de> for Sequence<'a, 'de> {
         V: de::DeserializeSeed<'de>,
     {
         seed.deserialize(&mut *self.de)
+    }
+}
+
+struct Enum<'a, 'de: 'a> {
+    de: &'a mut Deserializer<'de>,
+}
+
+impl<'a, 'de> Enum<'a, 'de> {
+    fn new(de: &'a mut Deserializer<'de>) -> Self {
+        Enum { de }
+    }
+}
+
+impl<'de, 'a> de::EnumAccess<'de> for Enum<'a, 'de> {
+    type Error = Error;
+    type Variant = Self;
+
+    fn variant_seed<V>(self, seed: V) -> Result<(V::Value, Self::Variant)>
+    where
+        V: de::DeserializeSeed<'de>,
+    {
+        let val = seed.deserialize(&mut *self.de)?;
+        Ok((val, self))
+    }
+}
+
+impl<'de, 'a> de::VariantAccess<'de> for Enum<'a, 'de> {
+    type Error = Error;
+
+    fn unit_variant(self) -> Result<()> {
+        // If we're in VariantAccess, the parse element wasn't a standalone
+        // word. This means it can't be an unit variant.
+        err!("Data after unit variant")
+    }
+
+    fn newtype_variant_seed<T>(self, seed: T) -> Result<T::Value>
+    where
+        T: de::DeserializeSeed<'de>,
+    {
+        seed.deserialize(&mut *self.de)
+    }
+
+    fn tuple_variant<V>(self, _len: usize, visitor: V) -> Result<V::Value>
+    where
+        V: de::Visitor<'de>,
+    {
+        de::Deserializer::deserialize_seq(&mut *self.de, visitor)
+    }
+
+    fn struct_variant<V>(
+        self,
+        fields: &'static [&'static str],
+        visitor: V,
+    ) -> Result<V::Value>
+    where
+        V: de::Visitor<'de>,
+    {
+        de::Deserializer::deserialize_struct(&mut *self.de, "", fields, visitor)
     }
 }
