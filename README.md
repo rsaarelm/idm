@@ -123,9 +123,9 @@ with only comments and blank lines allowed in between:
 Not part of block
 ```
 
-The colon block is equivalent to an extra level of indentation, without
-actually indenting the lines and adding a comment line to enable the
-"anonymous" outline. The fragment above is equivalent to
+A colon block is syntactic sugar for an extra level of indentation and a
+comment line that separates the headline-less outline. The fragment above is
+equivalent to
 
 ```notrust
 --
