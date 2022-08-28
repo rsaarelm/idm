@@ -44,7 +44,7 @@ impl<'a> Parser<'a> {
     /// A line will be parsed as a horizontal sequence of words and a block
     /// will be parsed as a vertical sequence of block items.
     ///
-    /// Will fail if already parsing a horizontal sequence. Will enter
+    /// Will fail if already parsing a horizontal sequence.
     pub fn enter_seq(&mut self) -> Result<()> {
         let top = self.stack.len() - 1;
         let new_top = self.stack[top].enter_seq()?;
@@ -57,7 +57,7 @@ impl<'a> Parser<'a> {
     /// Maps can only have a vertical structure. After entering a map, `next`
     /// will interleave keys and values for as long as the map has content.
     ///
-    /// Will fail if already parsing a horizontal sequence. If
+    /// Will fail if already parsing a horizontal sequence.
     pub fn enter_map(&mut self) -> Result<()> {
         let top = self.stack.len() - 1;
         let new_top = self.stack[top].enter_map()?;
