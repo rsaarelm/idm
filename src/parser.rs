@@ -8,6 +8,136 @@ use crate::{
     parse, Error, Result,
 };
 
+#[derive(Clone, Debug)]
+pub struct Parser<'a> {
+    /// For figuring out error numbers.
+    input: &'a str,
+    stack: Vec<State<'a>>,
+}
+
+impl<'a> Parser<'a> {
+    pub fn from_str(input: &'a str) -> Result<Self> {
+        Ok(Parser {
+            input,
+            stack: vec![State::Document(Fragment::from_str(input)?)],
+        })
+    }
+
+    pub fn read<T: FromStr>(&mut self) -> Result<T> {
+        let s = self.read_str()?;
+        // TODO Attach line number to error
+        T::from_str(&*s).map_err(|_| Error::new("Failed to parse value"))
+    }
+
+    /// Return the next concrete string token from current sequence or `None`
+    /// if at the end of sequence.
+    ///
+    /// If called immediately after `enter_pair`, will parse the next input
+    /// line in raw mode.
+    pub fn read_str(&mut self) -> Result<Cow<str>> {
+        let top = self.stack.len() - 1;
+        self.stack[top].next()
+    }
+
+    /// Enter a sequence of values.
+    ///
+    /// A line will be parsed as a horizontal sequence of words and a block
+    /// will be parsed as a vertical sequence of block items.
+    ///
+    /// Will fail if already parsing a horizontal sequence. Will enter
+    pub fn enter_seq(&mut self) -> Result<()> {
+        let top = self.stack.len() - 1;
+        let new_top = self.stack[top].enter_seq()?;
+        self.stack.push(new_top);
+        Ok(())
+    }
+
+    /// Enter a map of key-value data.
+    ///
+    /// Maps can only have a vertical structure. After entering a map, `next`
+    /// will interleave keys and values for as long as the map has content.
+    ///
+    /// Will fail if already parsing a horizontal sequence. If
+    pub fn enter_map(&mut self) -> Result<()> {
+        let top = self.stack.len() - 1;
+        let new_top = self.stack[top].enter_map()?;
+        self.stack.push(new_top);
+        Ok(())
+    }
+
+    /// Enter a struct.
+    ///
+    /// Structs are treated very similarly to maps. Unlike maps, structs have
+    /// a horizontal form where the field names are not written out. A
+    /// horizontal struct will have field names fed into `next` from the field
+    /// name list provided as an argument.
+    ///
+    /// If the struct is entered immediately after `enter_pair`, structs are
+    /// treated entirely like maps and horizontal structs are not recognized.
+    pub fn enter_struct(
+        &mut self,
+        fields: &'static [&'static str],
+    ) -> Result<()> {
+        let top = self.stack.len() - 1;
+        let new_top = self.stack[top].enter_struct(fields)?;
+        self.stack.push(new_top);
+        Ok(())
+    }
+
+    /// Enter a structural pair.
+    ///
+    /// This is a special method that enables irregular features in IDM. It
+    /// must be followed by either `next`, `enter_map` or `enter_struct` to
+    /// read the first pair element.
+    ///
+    /// Calling `next` will read a line in raw input mode (treating comments
+    /// and blank lines as input). The second element will be the indented
+    /// section body under the line. If the line has no section body, the next
+    /// element will be an empty block.
+    ///
+    /// Entering a map or struct after `enter_pair` will start parsing a block
+    /// and will treat the first block item as the map or struct and the rest
+    /// of the block as the second element of the pair.
+    ///
+    /// If `enter_map` or `enter_struct` was called for the first pair
+    /// element, `enter_map` or `enter_struct` must not be called for the
+    /// second element since the fused block syntax would make the separation
+    /// of the second map from the first undetectable.
+    pub fn enter_pair(&mut self) -> Result<()> {
+        let top = self.stack.len() - 1;
+        let new_top = self.stack[top].enter_pair()?;
+        self.stack.push(new_top);
+        Ok(())
+    }
+
+    /// Exit the current entered scope.
+    ///
+    /// The scope must not have any unparsed input (that would be returned by
+    /// `next`, if comments are being skipped, remaining comments do not
+    /// count) remamining. If there is, an error will be raised.
+    ///
+    /// Calling exit without a preceding enter call will panic.
+    pub fn exit(&mut self) -> Result<()> {
+        let top = self.stack.len() - 1;
+        if !self.stack[top].is_empty() {
+            return err!("Unparsed input remains");
+        }
+        self.stack.pop();
+        Ok(())
+    }
+
+    /// Return true if the current scope has no more items.
+    pub fn is_empty(&self) -> bool {
+        self.stack[self.stack.len() - 1].is_empty()
+    }
+
+    /// Return true if the current scope has no more items, not even commented
+    /// out items.
+    pub fn is_really_empty(&self) -> bool {
+        self.stack[self.stack.len() - 1].is_really_empty()
+    }
+}
+
 /// Parsing states that carry context fragments and are stacked in the parser
 /// stack.
 ///
@@ -644,136 +774,6 @@ impl fmt::Display for State<'_> {
             }
             State::PairSecond(o) => write!(f, "PairSecond(\n{})", o),
         }
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct Parser<'a> {
-    /// For figuring out error numbers.
-    input: &'a str,
-    stack: Vec<State<'a>>,
-}
-
-impl<'a> Parser<'a> {
-    pub fn from_str(input: &'a str) -> Result<Self> {
-        Ok(Parser {
-            input,
-            stack: vec![State::Document(Fragment::from_str(input)?)],
-        })
-    }
-
-    pub fn read<T: FromStr>(&mut self) -> Result<T> {
-        let s = self.read_str()?;
-        // TODO Attach line number to error
-        T::from_str(&*s).map_err(|_| Error::new("Failed to parse value"))
-    }
-
-    /// Return the next concrete string token from current sequence or `None`
-    /// if at the end of sequence.
-    ///
-    /// If called immediately after `enter_pair`, will parse the next input
-    /// line in raw mode.
-    pub fn read_str(&mut self) -> Result<Cow<str>> {
-        let top = self.stack.len() - 1;
-        self.stack[top].next()
-    }
-
-    /// Enter a sequence of values.
-    ///
-    /// A line will be parsed as a horizontal sequence of words and a block
-    /// will be parsed as a vertical sequence of block items.
-    ///
-    /// Will fail if already parsing a horizontal sequence. Will enter
-    pub fn enter_seq(&mut self) -> Result<()> {
-        let top = self.stack.len() - 1;
-        let new_top = self.stack[top].enter_seq()?;
-        self.stack.push(new_top);
-        Ok(())
-    }
-
-    /// Enter a map of key-value data.
-    ///
-    /// Maps can only have a vertical structure. After entering a map, `next`
-    /// will interleave keys and values for as long as the map has content.
-    ///
-    /// Will fail if already parsing a horizontal sequence. If
-    pub fn enter_map(&mut self) -> Result<()> {
-        let top = self.stack.len() - 1;
-        let new_top = self.stack[top].enter_map()?;
-        self.stack.push(new_top);
-        Ok(())
-    }
-
-    /// Enter a struct.
-    ///
-    /// Structs are treated very similarly to maps. Unlike maps, structs have
-    /// a horizontal form where the field names are not written out. A
-    /// horizontal struct will have field names fed into `next` from the field
-    /// name list provided as an argument.
-    ///
-    /// If the struct is entered immediately after `enter_pair`, structs are
-    /// treated entirely like maps and horizontal structs are not recognized.
-    pub fn enter_struct(
-        &mut self,
-        fields: &'static [&'static str],
-    ) -> Result<()> {
-        let top = self.stack.len() - 1;
-        let new_top = self.stack[top].enter_struct(fields)?;
-        self.stack.push(new_top);
-        Ok(())
-    }
-
-    /// Enter a structural pair.
-    ///
-    /// This is a special method that enables irregular features in IDM. It
-    /// must be followed by either `next`, `enter_map` or `enter_struct` to
-    /// read the first pair element.
-    ///
-    /// Calling `next` will read a line in raw input mode (treating comments
-    /// and blank lines as input). The second element will be the indented
-    /// section body under the line. If the line has no section body, the next
-    /// element will be an empty block.
-    ///
-    /// Entering a map or struct after `enter_pair` will start parsing a block
-    /// and will treat the first block item as the map or struct and the rest
-    /// of the block as the second element of the pair.
-    ///
-    /// If `enter_map` or `enter_struct` was called for the first pair
-    /// element, `enter_map` or `enter_struct` must not be called for the
-    /// second element since the fused block syntax would make the separation
-    /// of the second map from the first undetectable.
-    pub fn enter_pair(&mut self) -> Result<()> {
-        let top = self.stack.len() - 1;
-        let new_top = self.stack[top].enter_pair()?;
-        self.stack.push(new_top);
-        Ok(())
-    }
-
-    /// Exit the current entered scope.
-    ///
-    /// The scope must not have any unparsed input (that would be returned by
-    /// `next`, if comments are being skipped, remaining comments do not
-    /// count) remamining. If there is, an error will be raised.
-    ///
-    /// Calling exit without a preceding enter call will panic.
-    pub fn exit(&mut self) -> Result<()> {
-        let top = self.stack.len() - 1;
-        if !self.stack[top].is_empty() {
-            return err!("Unparsed input remains");
-        }
-        self.stack.pop();
-        Ok(())
-    }
-
-    /// Return true if the current scope has no more items.
-    pub fn is_empty(&self) -> bool {
-        self.stack[self.stack.len() - 1].is_empty()
-    }
-
-    /// Return true if the current scope has no more items, not even commented
-    /// out items.
-    pub fn is_really_empty(&self) -> bool {
-        self.stack[self.stack.len() - 1].is_really_empty()
     }
 }
 
