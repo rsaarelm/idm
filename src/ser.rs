@@ -198,22 +198,6 @@ impl Expr {
         }
     }
 
-    /// Push elements from a Seq expr into self.
-    fn concat(&mut self, e: Expr) {
-        match e {
-            Seq(es) | MapElement(es) | Pair(es) => {
-                for e in es.into_iter() {
-                    self.push(e);
-                }
-            }
-            e => self.push(e),
-        }
-    }
-
-    fn is_none(&self) -> bool {
-        matches!(self, Expr::None)
-    }
-
     fn is_inline_token(&self) -> bool {
         matches!(self, Atom(Word(_)))
     }
@@ -854,8 +838,6 @@ impl<'a> ser::SerializeTupleVariant for &'a mut Serializer {
 #[derive(Default)]
 struct MapSerializer {
     values: Vec<(Expr, Expr)>,
-    /// Stuff inside a struct's special '_contents' field.
-    contents: Expr,
 }
 
 impl<'a> ser::SerializeMap for MapSerializer {
@@ -922,10 +904,6 @@ impl<'a> ser::SerializeStruct for MapSerializer {
         let mut ret = Seq(Vec::new());
         for (key, value) in self.values.into_iter() {
             ret.push(MapElement(vec![key, value]));
-        }
-        // Put contents after all the entries if there was one
-        if !self.contents.is_none() {
-            ret.concat(self.contents);
         }
         Ok(ret)
     }
