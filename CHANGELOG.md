@@ -5,6 +5,8 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
+
+## [0.3.1] - 2022-09-16
 ### Additions
 - Enumeration type support
 
@@ -33,6 +35,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   state transitions instead of the previous monolithic parser.
 
 ## [0.2.0] - 2021-09-09
+### Additions
+- Comment syntax
+- Error reporting with line numbers
+- Spaces are also supported for indentation
 ### Changes
 - Missing headlines (double indentation) are no longer supported
 - Raw mode is now indicated by byte buffer type instead of `Option`
@@ -40,10 +46,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   separators
 ### Fixes
 - Section-like pair tuples are parsed correctly
-### Additions
-- Comment syntax
-- Error reporting with line numbers
-- Spaces are also supported for indentation
 
 ## [0.1.0] - 2021-04-10
 Initial release
