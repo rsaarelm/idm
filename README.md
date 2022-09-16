@@ -344,6 +344,10 @@ expected to copy that in your own application. You will also probably want to
 implement your own application-specific methods for the type, which will be
 easier if you own the type.
 
+For another example of an outline structure with data mixed in, see the
+minimal [blog engine](./examples/blog.rs) and corresponding [content
+file](./examples/blog.idm) in examples.
+
 ## Accepted shapes
 
 | Type             | Vertical value           | Horizontal value |
