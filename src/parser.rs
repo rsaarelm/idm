@@ -8,17 +8,13 @@ use crate::{
     parse, Error, Result,
 };
 
-#[derive(Clone, Debug)]
 pub struct Parser<'a> {
-    /// For figuring out error numbers.
-    input: &'a str,
     stack: Vec<State<'a>>,
 }
 
 impl<'a> Parser<'a> {
     pub fn from_str(input: &'a str) -> Result<Self> {
         Ok(Parser {
-            input,
             stack: vec![State::Document(Fragment::from_str(input)?)],
         })
     }
