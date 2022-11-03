@@ -6,6 +6,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [0.3.2] - 2022-11-03
+New release to fix cargo crate that had junk included.
+
 ## [0.3.1] - 2022-09-16
 ### Additions
 - Enumeration type support

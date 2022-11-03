@@ -1,7 +1,7 @@
 [package]
 edition = "2021"
 name = "idm"
-version = "0.3.1"
+version = "0.3.2"
 authors = ["Risto Saarelma <risto.saarelma@iki.fi>"]
 exclude = ["fuzz/", "githooks/", "shell.nix", "Justfile"]
 description = "Implicit Data Markup"
