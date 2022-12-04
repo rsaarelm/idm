@@ -70,8 +70,11 @@ impl Error {
         self
     }
 
-    pub fn with_file_name(mut self, file_name: String) -> Error {
-        self.file_name = Some(file_name);
+    pub fn with_file_name(
+        mut self,
+        file_name: impl std::fmt::Display,
+    ) -> Error {
+        self.file_name = Some(file_name.to_string());
         self
     }
 
