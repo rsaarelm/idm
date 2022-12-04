@@ -176,7 +176,7 @@ impl<'a> Outline<'a> {
                 //
                 // Remove the colon (and any whitespace between colon and
                 // content).
-                self.0[top].head = (&self.0[top].head[1..])
+                self.0[top].head = self.0[top].head[1..]
                     .trim_start_matches(CharExt::is_idm_whitespace);
                 // Accumulate to colon block and continue.
                 colon_block.push(self.0.pop().unwrap());

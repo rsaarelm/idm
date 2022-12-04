@@ -8,13 +8,13 @@ type ParseResult<'a, T> = std::result::Result<(T, &'a str), &'a str>;
 pub fn word(input: &str) -> ParseResult<&str> {
     let end_pos = input
         .char_indices()
-        .find_map(|(i, c)| c.is_idm_whitespace().then(|| i))
-        .unwrap_or_else(|| input.len());
+        .find_map(|(i, c)| c.is_idm_whitespace().then_some(i))
+        .unwrap_or(input.len());
 
     let next_pos = input[end_pos..]
         .char_indices()
-        .find_map(|(i, c)| (!c.is_idm_whitespace()).then(|| end_pos + i))
-        .unwrap_or_else(|| input.len());
+        .find_map(|(i, c)| (!c.is_idm_whitespace()).then_some(end_pos + i))
+        .unwrap_or(input.len());
 
     debug_assert!(next_pos >= end_pos);
 

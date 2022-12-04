@@ -193,8 +193,8 @@ impl<'de, T: DeserializeOwned, U: DeserializeOwned> Deserialize<'de>
     {
         let ret = String::deserialize(deserializer)?;
         if let Some((head, tail)) = ret.split_once(':') {
-            let head = from_str(&head).map_err(de::Error::custom)?;
-            let tail = from_str(&tail).map_err(de::Error::custom)?;
+            let head = from_str(head).map_err(de::Error::custom)?;
+            let tail = from_str(tail).map_err(de::Error::custom)?;
             Ok(ColonPair(head, tail))
         } else {
             Err(de::Error::custom("No colon found in value"))
