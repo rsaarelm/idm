@@ -81,7 +81,7 @@ outline has invalid syntax:
 ```notrust
 A      -- Headline
     B  -- Item 1: Indent depth 4
-  C    -- Item 2: Indent depth 2
+  C    -- Item 2: Indent depth 2, inconsistent dedentation
 ```
 
 Blank lines are interpreted to have the indent depth of the first nonblank
@@ -93,6 +93,16 @@ The presence of a trailing newline is syntactically significant for
 single-line documents. A single line with a trailing newline is read as a
 single-item outline, while a single line without a trailing newline is read as
 a fragment that may be interpreted as a horizontal sequence.
+
+Some parts of an IDM document may correspond to multiline string values from
+serialized user data, but they must still follow IDM's indentation conventions
+along with the rest of the document. String values with leading whitespace,
+inconsistent dedentation or indentation that mixes tabs and spaces cannot be
+serialized. If the serialization is using a different indentation style than
+the multiline string (tabs instead of spaces or vice versa), the string is
+rewritten to use the different indentation style. Layout information from the
+original indentation may be lost when this happens, though the logical
+structure of the indentation should always be preserved.
 
 ## Special syntax
 
