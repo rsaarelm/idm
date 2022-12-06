@@ -6,6 +6,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Changes
+- The indentations of multiline string values are now munged to remain
+  consistent with current indentation style when serializing if necessary.
+  String values that have leading whitespace or are not valid IDM outline
+  fragments will fail to serialize.
+- Minor improvement in error value API ergonomics
+
 ## [0.3.2] - 2022-11-03
 New release to fix cargo crate that had junk included.
 

@@ -6,7 +6,6 @@ pub use error::{Error, Result};
 
 mod fragment;
 
-#[cfg(test)]
 mod outline;
 
 mod parse;

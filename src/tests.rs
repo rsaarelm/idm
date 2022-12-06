@@ -1,7 +1,8 @@
 use std::{collections::BTreeMap, fmt, iter::FromIterator};
 
 use crate::{
-    from_str, outline, outline::Outline, to_string, to_string_styled_like,
+    from_str, outline, outline::Outline, to_string, to_string_styled,
+    to_string_styled_like, Style,
 };
 use indexmap::IndexMap;
 use lazy_static::lazy_static;
@@ -1176,6 +1177,58 @@ Tuple
   2
   3
 Struct 4 5"
+    );
+}
+
+#[test]
+fn string_literal_indent_rewrite() {
+    // Multiline string literals need to have their indentation rewritten to
+    // match a changed file indent style.
+    //
+    // The troublesome literal is an attribute value, so when read into a data
+    // outline it'll be read as a single value, not as part of the outline.
+    let tabbed_input = "\
+:attribute
+\tLine 1
+\t\tIndented Line 2";
+
+    let tabs_outline: DataOutline = from_str(tabbed_input).unwrap();
+
+    // Literals are read in with whichever style the file uses.
+    assert_eq!(
+        tabs_outline,
+        DataOutline((
+            IndexMap::from([(s("attribute"), s("Line 1\n\tIndented Line 2"))]),
+            Default::default()
+        ))
+    );
+
+    // Now let's save the thing as a plain outline, with no style suggestions,
+    // so we'll default to spaces.
+    let default_output = to_string(&tabs_outline).unwrap();
+    // The serialization should alter the literal so that it does not have
+    // spaces.
+    assert_eq!(
+        default_output,
+        ":attribute\n  Line 1\n    Indented Line 2\n"
+    );
+
+    // Now let's do spaces to tabs
+    let spaces_outline: DataOutline = from_str(&default_output).unwrap();
+    assert_eq!(
+        spaces_outline,
+        DataOutline((
+            IndexMap::from([(s("attribute"), s("Line 1\n  Indented Line 2"))]),
+            Default::default()
+        ))
+    );
+
+    let tabified_output =
+        to_string_styled(Style::Tabs, &spaces_outline).unwrap();
+    // And we should be back where we started.
+    assert_eq!(
+        tabified_output,
+        ":attribute\n\tLine 1\n\t\tIndented Line 2\n"
     );
 }
 

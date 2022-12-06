@@ -1,4 +1,7 @@
-use crate::{err, guess_indent_style, parse::CharExt, Error, Result};
+use crate::{
+    err, from_str, guess_indent_style, infer_indent_style, parse::CharExt,
+    Error, Result,
+};
 use serde::{
     ser::{self, SerializeMap},
     Serialize,
@@ -15,7 +18,7 @@ pub fn to_string_styled<T: ser::Serialize>(
     style: Style,
     value: &T,
 ) -> Result<String> {
-    let mut serializer = Serializer::default();
+    let mut serializer = Serializer { style };
     let expr = value.serialize(&mut serializer)?;
     Ok(Formatted(style, expr).to_string())
 }
@@ -59,7 +62,7 @@ impl fmt::Display for Value {
 }
 
 impl Value {
-    pub fn new(text: impl AsRef<str>) -> Result<Value> {
+    pub fn new(style: Style, text: impl AsRef<str>) -> Result<Value> {
         let text = text
             .as_ref()
             .trim_end_matches(CharExt::is_idm_whitespace)
@@ -83,7 +86,7 @@ impl Value {
         }
 
         if newline {
-            Ok(Value::Paragraph(text))
+            Ok(Value::Paragraph(reformat_string(style, text)?))
         } else if space {
             Ok(Value::Line(text))
         } else {
@@ -91,12 +94,12 @@ impl Value {
         }
     }
 
-    pub fn empty_line() -> Value {
-        Value::Paragraph("\n".into())
+    fn from(style: Style, item: impl fmt::Display) -> Result<Value> {
+        Value::new(style, item.to_string())
     }
 
-    fn from<T: fmt::Display>(item: T) -> Result<Value> {
-        Value::new(item.to_string())
+    pub fn empty_line() -> Value {
+        Value::Paragraph("\n".into())
     }
 
     fn as_str(&self) -> &str {
@@ -180,12 +183,12 @@ impl Default for Expr {
 }
 
 impl Expr {
-    fn from<T: fmt::Display>(item: T) -> Result<Expr> {
+    fn from(style: Style, item: impl fmt::Display) -> Result<Expr> {
         let s = format!("{}", item);
         if s.trim_end_matches(CharExt::is_idm_whitespace).is_empty() {
             Ok(Expr::None)
         } else {
-            Ok(Atom(Value::from(item)?))
+            Ok(Atom(Value::from(style, item)?))
         }
     }
 
@@ -542,10 +545,22 @@ impl Style {
         }
         Ok(())
     }
+
+    fn compatible_with(&self, other: &Style) -> bool {
+        use Style::*;
+        matches!((self, other), (Tabs, Tabs) | (Spaces(_), Spaces(_)))
+    }
 }
 
-#[derive(Default)]
-struct Serializer;
+struct Serializer {
+    style: Style,
+}
+
+impl Serializer {
+    pub fn new(style: Style) -> Self {
+        Serializer { style }
+    }
+}
 
 impl<'a> ser::Serializer for &'a mut Serializer {
     type Ok = Expr;
@@ -560,47 +575,47 @@ impl<'a> ser::Serializer for &'a mut Serializer {
     type SerializeStructVariant = MapSerializer;
 
     fn serialize_bool(self, v: bool) -> Result<Expr> {
-        Expr::from(v)
+        Expr::from(self.style, v)
     }
 
     fn serialize_i8(self, v: i8) -> Result<Expr> {
-        Expr::from(v)
+        Expr::from(self.style, v)
     }
 
     fn serialize_i16(self, v: i16) -> Result<Expr> {
-        Expr::from(v)
+        Expr::from(self.style, v)
     }
 
     fn serialize_i32(self, v: i32) -> Result<Expr> {
-        Expr::from(v)
+        Expr::from(self.style, v)
     }
 
     fn serialize_i64(self, v: i64) -> Result<Expr> {
-        Expr::from(v)
+        Expr::from(self.style, v)
     }
 
     fn serialize_u8(self, v: u8) -> Result<Expr> {
-        Expr::from(v)
+        Expr::from(self.style, v)
     }
 
     fn serialize_u16(self, v: u16) -> Result<Expr> {
-        Expr::from(v)
+        Expr::from(self.style, v)
     }
 
     fn serialize_u32(self, v: u32) -> Result<Expr> {
-        Expr::from(v)
+        Expr::from(self.style, v)
     }
 
     fn serialize_u64(self, v: u64) -> Result<Expr> {
-        Expr::from(v)
+        Expr::from(self.style, v)
     }
 
     fn serialize_f32(self, v: f32) -> Result<Expr> {
-        Expr::from(v)
+        Expr::from(self.style, v)
     }
 
     fn serialize_f64(self, v: f64) -> Result<Expr> {
-        Expr::from(v)
+        Expr::from(self.style, v)
     }
 
     fn serialize_char(self, v: char) -> Result<Expr> {
@@ -610,14 +625,14 @@ impl<'a> ser::Serializer for &'a mut Serializer {
             return err!("Can't serialize whitespace chars");
         }
 
-        Expr::from(v)
+        Expr::from(self.style, v)
     }
 
     fn serialize_str(self, v: &str) -> Result<Expr> {
         if v.trim_end_matches(CharExt::is_idm_whitespace).is_empty() {
             Ok(Atom(Value::empty_line()))
         } else {
-            Expr::from(v)
+            Expr::from(self.style, v)
         }
     }
 
@@ -650,7 +665,7 @@ impl<'a> ser::Serializer for &'a mut Serializer {
         _variant_index: u32,
         variant: &'static str,
     ) -> Result<Expr> {
-        Expr::from(variant)
+        Expr::from(self.style, variant)
     }
 
     fn serialize_newtype_struct<T>(
@@ -681,14 +696,14 @@ impl<'a> ser::Serializer for &'a mut Serializer {
     }
 
     fn serialize_seq(self, len: Option<usize>) -> Result<Self::SerializeSeq> {
-        Ok(SeqSerializer::new(len.unwrap_or(0)))
+        Ok(SeqSerializer::new(self.style, len.unwrap_or(0)))
     }
 
     fn serialize_tuple(self, len: usize) -> Result<Self::SerializeTuple> {
         if len != 2 {
             unimplemented!("Non-pair (len = {}) tuples are not supported", len);
         }
-        Ok(SeqSerializer::new(len).is_pair())
+        Ok(SeqSerializer::new(self.style, len).is_pair())
     }
 
     fn serialize_tuple_struct(
@@ -696,7 +711,7 @@ impl<'a> ser::Serializer for &'a mut Serializer {
         _name: &'static str,
         len: usize,
     ) -> Result<Self::SerializeTupleStruct> {
-        Ok(SeqSerializer::new(len))
+        Ok(SeqSerializer::new(self.style, len))
     }
 
     fn serialize_tuple_variant(
@@ -706,11 +721,11 @@ impl<'a> ser::Serializer for &'a mut Serializer {
         variant: &'static str,
         len: usize,
     ) -> Result<Self::SerializeTupleVariant> {
-        Ok(SeqSerializer::new(len).enum_variant(variant))
+        Ok(SeqSerializer::new(self.style, len).enum_variant(variant))
     }
 
     fn serialize_map(self, _len: Option<usize>) -> Result<Self::SerializeMap> {
-        Ok(MapSerializer::default())
+        Ok(MapSerializer::new(self.style))
     }
 
     fn serialize_struct(
@@ -728,11 +743,10 @@ impl<'a> ser::Serializer for &'a mut Serializer {
         variant: &'static str,
         _len: usize,
     ) -> Result<Self::SerializeStructVariant> {
-        Ok(MapSerializer::default().enum_variant(variant))
+        Ok(MapSerializer::new(self.style).enum_variant(variant))
     }
 }
 
-#[derive(Default)]
 struct SeqSerializer {
     idx: usize,
     is_pair: bool,
@@ -740,11 +754,18 @@ struct SeqSerializer {
     acc: Expr,
     /// Name of the enum variant used by enum implementations.
     enum_variant: Expr,
+    style: Style,
 }
 
 impl SeqSerializer {
-    pub fn new(_len: usize) -> Self {
-        Default::default()
+    pub fn new(style: Style, _len: usize) -> Self {
+        SeqSerializer {
+            idx: 0,
+            is_pair: false,
+            acc: Default::default(),
+            enum_variant: Default::default(),
+            style,
+        }
     }
 
     pub fn is_pair(mut self) -> Self {
@@ -753,8 +774,8 @@ impl SeqSerializer {
     }
 
     pub fn enum_variant(mut self, enum_variant: &str) -> Self {
-        self.enum_variant =
-            Expr::from(enum_variant).expect("Invalid enum variant name");
+        self.enum_variant = Expr::from(self.style, enum_variant)
+            .expect("Invalid enum variant name");
         self
     }
 
@@ -771,7 +792,8 @@ impl SeqSerializer {
         }
         self.idx += 1;
 
-        self.acc.push(value.serialize(&mut Serializer::default())?);
+        self.acc
+            .push(value.serialize(&mut Serializer::new(self.style))?);
         Ok(())
     }
 }
@@ -791,7 +813,8 @@ impl ser::SerializeSeq for SeqSerializer {
         }
         self.idx += 1;
 
-        self.acc.push(value.serialize(&mut Serializer::default())?);
+        self.acc
+            .push(value.serialize(&mut Serializer::new(self.style))?);
         Ok(())
     }
 
@@ -848,16 +871,24 @@ impl ser::SerializeTupleVariant for SeqSerializer {
     }
 }
 
-#[derive(Default)]
 struct MapSerializer {
     values: Vec<(Expr, Expr)>,
     enum_variant: Expr,
+    style: Style,
 }
 
 impl MapSerializer {
+    pub fn new(style: Style) -> Self {
+        MapSerializer {
+            values: Default::default(),
+            enum_variant: Default::default(),
+            style,
+        }
+    }
+
     pub fn enum_variant(mut self, enum_variant: &str) -> Self {
-        self.enum_variant =
-            Expr::from(enum_variant).expect("Invalid enum variant name");
+        self.enum_variant = Expr::from(self.style, enum_variant)
+            .expect("Invalid enum variant name");
         self
     }
 }
@@ -870,7 +901,7 @@ impl ser::SerializeMap for MapSerializer {
     where
         T: ?Sized + Serialize,
     {
-        let key = key.serialize(&mut Serializer::default())?;
+        let key = key.serialize(&mut Serializer::new(self.style))?;
         if key.can_be_inlined() {
             // Put a dummy value, fill it in in serialize_value.
             self.values.push((key, Expr::None));
@@ -887,7 +918,7 @@ impl ser::SerializeMap for MapSerializer {
         // Should have been started by serialize_key before we get here.
         debug_assert!(!self.values.is_empty());
 
-        let value = value.serialize(&mut Serializer::default())?;
+        let value = value.serialize(&mut Serializer::new(self.style))?;
         let idx = self.values.len() - 1;
         if value.is_empty() {
             // Empty value, do not save.
@@ -947,5 +978,46 @@ impl ser::SerializeStructVariant for MapSerializer {
             self.enum_variant.clone(),
             ser::SerializeStruct::end(self)?,
         ]))
+    }
+}
+
+/// Reformat a multiline string value if necessary so that it will be a valid
+/// IDM fragment in the indentation style of the output.
+///
+/// Returns an error if the string is not a valid IDM fragment to begin with.
+fn reformat_string(output_style: Style, input: String) -> Result<String> {
+    // Leading whitespace can't be handled, fail fast.
+    if let Some(c) = input.chars().next() {
+        if c.is_idm_whitespace() {
+            return err!("Leading whitespace in string value");
+        }
+    }
+
+    let input_style = if let Some(input_style) = infer_indent_style(&input) {
+        input_style
+    } else {
+        // If the indent can't be inferred, no input lines are indented,
+        // string can be used as is.
+        return Ok(input);
+    };
+
+    // The input has some indentation, so it might not be valid IDM. Let's
+    // check that right now. If it deserializes into Outline, it should be
+    // good.
+    let outline: crate::outline::Outline = from_str(&input)?;
+
+    if input_style.compatible_with(&output_style) {
+        // It's valid input and already uses the indentation type we want,
+        // return as is and forget about our outline value.
+        Ok(input)
+    } else {
+        // Otherwise fix the indentation by reserializing the outline.
+
+        // NB. A simple outline type should only have single-line line values
+        // that will return None form infer_indent_style, so this does not
+        // lead into infinite recursion as these are again passed through
+        // reformat_string when serializing.
+        let reser = to_string_styled(output_style, &outline)?;
+        Ok(reser)
     }
 }
