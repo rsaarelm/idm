@@ -201,12 +201,25 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
     where
         V: de::Visitor<'de>,
     {
-        if len != 2 {
-            unimplemented!("Non-pair (len = {}) tuples are not supported", len);
+        if len == 1 {
+            // This is an singleton tuple, it's the marker for the special
+            // form. If this shows up at the start of a sequence, change the
+            // sequence into the special pair.
+            self.enter_special()?;
+        } else if len == 2 {
+            // The head value can be a singleton tuple and mark special mode,
+            // but only if the containing sequence is a pair. Have special
+            // treatment for pairs.
+            self.enter_pair()?;
+        } else {
+            self.enter_seq()?;
         }
-        self.enter_pair()?;
         let ret = visitor.visit_seq(Sequence::new(self))?;
-        self.exit()?;
+        if len > 1 {
+            // Don't call exit with special form, it didn't involve a push in
+            // the state machine.
+            self.exit()?;
+        }
         Ok(ret)
     }
 
@@ -219,6 +232,10 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
     where
         V: de::Visitor<'de>,
     {
+        // Assuming tuple struct len will always be >= 2 and a single value
+        // will go to deserialize_newtype_struct instead. Otherwise we'd want
+        // to avoid triggering `enter_special` from here since it's meant to
+        // be used only with a plain singleton tuple.
         self.deserialize_tuple(len, visitor)
     }
 

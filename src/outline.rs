@@ -2,18 +2,20 @@ use serde::{Deserialize, Serialize};
 use std::{fmt, ops::Deref};
 
 #[derive(Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Outline(Vec<(String, Outline)>);
+pub struct Outline(Vec<((String,), Outline)>);
 
 impl Deref for Outline {
-    type Target = Vec<(String, Outline)>;
+    type Target = Vec<((String,), Outline)>;
 
     fn deref(&self) -> &Self::Target {
         &self.0
     }
 }
 
-impl std::iter::FromIterator<(String, Outline)> for Outline {
-    fn from_iter<U: IntoIterator<Item = (String, Outline)>>(iter: U) -> Self {
+impl std::iter::FromIterator<((String,), Outline)> for Outline {
+    fn from_iter<U: IntoIterator<Item = ((String,), Outline)>>(
+        iter: U,
+    ) -> Self {
         Outline(iter.into_iter().collect())
     }
 }
@@ -25,7 +27,7 @@ impl fmt::Debug for Outline {
             depth: usize,
             otl: &Outline,
         ) -> fmt::Result {
-            for (title, body) in &otl.0 {
+            for ((title,), body) in &otl.0 {
                 for _ in 0..depth {
                     write!(f, "  ")?;
                 }
@@ -47,10 +49,10 @@ impl fmt::Debug for Outline {
 #[macro_export(local_inner_macros)]
 macro_rules! outline_elt {
     ([$arg:expr, $($child:tt),+]) => {
-        ($arg.into(), outline![$($child),+])
+        (($arg.into(),), outline![$($child),+])
     };
     ($arg:expr) => {
-        ($arg.into(), $crate::outline::Outline::default())
+        (($arg.into(),), $crate::outline::Outline::default())
     };
 }
 

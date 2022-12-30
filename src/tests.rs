@@ -273,14 +273,14 @@ Beware the Jubjub bird, and shun
 #[test]
 fn section_tuple() {
     test!(
-        &vec![(1, 2)],
+        &vec![((1,), 2)],
         "\
 1
   2"
     );
 
     test!(
-        &vec![(1, 2), (3, 4)],
+        &vec![((1,), 2), ((3,), 4)],
         "\
 1
 \t2
@@ -290,7 +290,7 @@ fn section_tuple() {
 
     test!(
         &vec![(
-            s("Lorem"),
+            (s("Lorem"),),
             s("ipsum dolor sit amet\nconsectetur adipiscing elit"),
         )],
         "\
@@ -513,11 +513,11 @@ y 2",
 fn colon_struct() {
     test!(
         &(
-            Simple {
+            (Simple {
                 name_text: s("A"),
                 x: 1,
                 y: 2
-            },
+            },),
             s("Content")
         ),
         _,
@@ -531,11 +531,11 @@ Content"
     // No content
     test!(
         &(
-            Simple {
+            (Simple {
                 name_text: s("A"),
                 x: 1,
                 y: 2
-            },
+            },),
             String::new()
         ),
         _,
@@ -706,7 +706,7 @@ fn oneshot_section() {
     }
 
     test!(
-        &(s("Headline"), Data { x: 1, y: 2 }),
+        &((s("Headline"),), Data { x: 1, y: 2 }),
         "\
 Headline
   x 1
@@ -729,7 +729,7 @@ fn oneshot_section_struct_vec() {
 
     test!(
         &vec![(
-            s("Some words"),
+            (s("Some words"),),
             Data2 {
                 a: s("a"),
                 b: vec![s("b1"), s("b2")],
@@ -746,7 +746,7 @@ Some words
     test!(
         &vec![
             (
-                s("Some words"),
+                (s("Some words"),),
                 Data2 {
                     a: s("a"),
                     b: vec![s("b1"), s("b2")],
@@ -754,7 +754,7 @@ Some words
                 }
             ),
             (
-                s("Second run"),
+                (s("Second run"),),
                 Data2 {
                     a: s("a"),
                     b: vec![s("b1"), s("b2")],
@@ -778,7 +778,7 @@ Second run
 fn oneshot_section_map_vec() {
     test!(
         &vec![(
-            s("Some words"),
+            (s("Some words"),),
             BTreeMap::from_iter(
                 vec![(s("a"), vec![1, 2]), (s("b"), vec![3, 4])].into_iter()
             )
@@ -792,14 +792,14 @@ Some words
     test!(
         &vec![
             (
-                s("Some words"),
+                (s("Some words"),),
                 BTreeMap::from_iter(
                     vec![(s("a"), vec![1, 2]), (s("b"), vec![3, 4])]
                         .into_iter()
                 )
             ),
             (
-                s("Second run"),
+                (s("Second run"),),
                 BTreeMap::from_iter(
                     vec![(s("a"), vec![1, 2]), (s("b"), vec![3, 4])]
                         .into_iter()
@@ -830,10 +830,10 @@ struct Planet {
 
 lazy_static! {
     #[rustfmt::skip]
-    static ref STARMAP: IndexMap<String, (Star, IndexMap<String, Planet>)> = IndexMap::from_iter(
+    static ref STARMAP: IndexMap<String, ((Star,), IndexMap<String, Planet>)> = IndexMap::from_iter(
         vec![
             (s("Sol"),
-            (Star { age: 4.6e9, mass: 1.0},
+            ((Star { age: 4.6e9, mass: 1.0},),
              IndexMap::from_iter(vec![
                  (s("Mercury"), Planet { orbit: 0.39, mass: 0.055 }),
                  (s("Venus"),   Planet { orbit: 0.72, mass: 0.815 }),
@@ -841,7 +841,7 @@ lazy_static! {
                  (s("Mars"),    Planet { orbit: 1.52, mass: 0.1 })
             ].into_iter()))),
             (s("Alpha Centauri"),
-            (Star { age: 5.3e9, mass: 1.1},
+            ((Star { age: 5.3e9, mass: 1.1},),
              IndexMap::from_iter(vec![
                  (s("Eurytion"), Planet { orbit: 0.47, mass: 0.08 }),
                  (s("Chiron"),   Planet { orbit: 1.32, mass: 1.33 }),
@@ -911,11 +911,11 @@ fn nesting_contents_2() {
     // Section-like adorned field.
     test!(
         &(
-            Simple {
+            (Simple {
                 name_text: s("foo\nbar"),
                 x: 1,
                 y: 2
-            },
+            },),
             s("Content")
         ),
         "\
@@ -1064,7 +1064,7 @@ fn colon_variations() {
 
     // Valid colon block, non-whitespace character touching colon.
     test!(
-        &(StringMap::from([(s("valid"), s("1"))]), s("Text")),
+        &((StringMap::from([(s("valid"), s("1"))]),), s("Text")),
         "\
 :valid 1
 Text"
@@ -1072,14 +1072,14 @@ Text"
 
     // Invalid ones, treated as text.
     test!(
-        &(StringMap::default(), s(": invalid 2\nText")),
+        &((StringMap::default(),), s(": invalid 2\nText")),
         "\
 : invalid 2
 Text"
     );
 
     test!(
-        &(StringMap::default(), s(":\nText")),
+        &((StringMap::default(),), s(":\nText")),
         "\
 :
 Text"
@@ -1087,46 +1087,49 @@ Text"
 }
 
 #[derive(PartialEq, Default, Debug, Serialize, Deserialize)]
-struct DataOutline((IndexMap<String, String>, Vec<(String, DataOutline)>));
+struct DataOutline((IndexMap<String, String>,), Vec<((String,), DataOutline)>);
 
 #[test]
 fn data_outline() {
     test!(&DataOutline::default(), "");
 
     test!(
-        &DataOutline((Default::default(), vec![(s("A"), Default::default())])),
+        &DataOutline(
+            (Default::default(),),
+            vec![((s("A"),), Default::default())]
+        ),
         "A\n"
     );
 
     test!(
-        &DataOutline((
-            IndexMap::from([(s("message"), s("Hello"))]),
+        &DataOutline(
+            (IndexMap::from([(s("message"), s("Hello"))]),),
             Default::default()
-        )),
+        ),
         ":message Hello\n"
     );
 
     test!(
-        &DataOutline((
-            IndexMap::from([(s("message"), s("Hello"))]),
-            vec![(s("A"), Default::default())]
-        )),
+        &DataOutline(
+            (IndexMap::from([(s("message"), s("Hello"))]),),
+            vec![((s("A"),), Default::default())]
+        ),
         "\
 :message Hello
 A"
     );
 
     test!(
-        &DataOutline((
+        &DataOutline(
             Default::default(),
             vec![(
-                s("Title"),
-                DataOutline((
-                    IndexMap::from([(s("attr"), s("123"))]),
-                    vec![(s("Subpage"), Default::default())]
-                ))
+                (s("Title"),),
+                DataOutline(
+                    (IndexMap::from([(s("attr"), s("123"))]),),
+                    vec![((s("Subpage"),), Default::default())]
+                )
             )]
-        )),
+        ),
         "\
 Title
   :attr 123
@@ -1217,10 +1220,13 @@ fn string_literal_indent_rewrite() {
     // Literals are read in with whichever style the file uses.
     assert_eq!(
         tabs_outline,
-        DataOutline((
-            IndexMap::from([(s("attribute"), s("Line 1\n\tIndented Line 2"))]),
+        DataOutline(
+            (IndexMap::from([(
+                s("attribute"),
+                s("Line 1\n\tIndented Line 2")
+            )]),),
             Default::default()
-        ))
+        )
     );
 
     // Now let's save the thing as a plain outline, with no style suggestions,
@@ -1237,10 +1243,13 @@ fn string_literal_indent_rewrite() {
     let spaces_outline: DataOutline = from_str(&default_output).unwrap();
     assert_eq!(
         spaces_outline,
-        DataOutline((
-            IndexMap::from([(s("attribute"), s("Line 1\n  Indented Line 2"))]),
+        DataOutline(
+            (IndexMap::from([(
+                s("attribute"),
+                s("Line 1\n  Indented Line 2")
+            )]),),
             Default::default()
-        ))
+        )
     );
 
     let tabified_output =
@@ -1279,8 +1288,8 @@ where
             .expect("Value did not serialize to IDM");
 
         if idm != reser {
-            println!("Deserialized \n\x1b[1;32m{}\x1b[0m", idm);
-            println!("Reserialized \n\x1b[1;31m{}\x1b[0m", reser);
+            println!("Deserialized \n\x1b[1;32m{idm}\x1b[0m");
+            println!("Reserialized \n\x1b[1;31m{reser}\x1b[0m");
         }
 
         assert_eq!(idm, reser);

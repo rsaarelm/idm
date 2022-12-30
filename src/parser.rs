@@ -10,12 +10,21 @@ use crate::{
 
 pub struct Parser<'a> {
     stack: Vec<State<'a>>,
+    /// Flag for the weird special stuff part.
+    ///
+    /// When entering a two-element sequence, no immediate stack ops are done,
+    /// instead, at_pair_start is set to true. If the very next element is a
+    /// one-element sequence (singleton tuple), this marks the start of the
+    /// special mode and different stack operations will be performed. Any
+    /// other element will cause normal sequence processing to commence.
+    at_pair_start: bool,
 }
 
 impl<'a> Parser<'a> {
     pub fn from_str(input: &'a str) -> Result<Self> {
         Ok(Parser {
             stack: vec![State::Document(Fragment::from_str(input)?)],
+            at_pair_start: false,
         })
     }
 
@@ -31,9 +40,11 @@ impl<'a> Parser<'a> {
     /// Return the next concrete string token from current sequence or `None`
     /// if at the end of sequence.
     ///
-    /// If called immediately after `enter_pair`, will parse the next input
+    /// If called immediately after `enter_special`, will parse the next input
     /// line in raw mode.
     pub fn read_str(&mut self) -> Result<Cow<str>> {
+        self.normal_mode()?;
+
         let top = self.stack.len() - 1;
         self.stack[top].next()
     }
@@ -45,9 +56,23 @@ impl<'a> Parser<'a> {
     ///
     /// Will fail if already parsing a horizontal sequence.
     pub fn enter_seq(&mut self) -> Result<()> {
+        self.normal_mode()?;
+
         let top = self.stack.len() - 1;
         let new_top = self.stack[top].enter_seq()?;
         self.stack.push(new_top);
+        Ok(())
+    }
+
+    /// Method for sequences that might switch to special mode at their head.
+    ///
+    /// Don't do any operations here, just set the `at_pair_start` flag. The
+    /// operation will be deferred to the when either `normal_mode` or
+    /// `special_mode` is called.
+    pub fn enter_pair(&mut self) -> Result<()> {
+        self.normal_mode()?;
+
+        self.at_pair_start = true;
         Ok(())
     }
 
@@ -58,6 +83,8 @@ impl<'a> Parser<'a> {
     ///
     /// Will fail if already parsing a horizontal sequence.
     pub fn enter_map(&mut self) -> Result<()> {
+        self.normal_mode()?;
+
         let top = self.stack.len() - 1;
         let new_top = self.stack[top].enter_map()?;
         self.stack.push(new_top);
@@ -71,19 +98,22 @@ impl<'a> Parser<'a> {
     /// horizontal struct will have field names fed into `next` from the field
     /// name list provided as an argument.
     ///
-    /// If the struct is entered immediately after `enter_pair`, structs are
-    /// treated entirely like maps and horizontal structs are not recognized.
+    /// If the struct is entered immediately after `enter_special`, structs
+    /// are treated entirely like maps and horizontal structs are not
+    /// recognized.
     pub fn enter_struct(
         &mut self,
         fields: &'static [&'static str],
     ) -> Result<()> {
+        self.normal_mode()?;
+
         let top = self.stack.len() - 1;
         let new_top = self.stack[top].enter_struct(fields)?;
         self.stack.push(new_top);
         Ok(())
     }
 
-    /// Enter a structural pair.
+    /// Enter the special state.
     ///
     /// This is a special method that enables irregular features in IDM. It
     /// must be followed by either `next`, `enter_map` or `enter_struct` to
@@ -94,17 +124,23 @@ impl<'a> Parser<'a> {
     /// section body under the line. If the line has no section body, the next
     /// element will be an empty block.
     ///
-    /// Entering a map or struct after `enter_pair` will start parsing a block
-    /// and will treat the first block item as the map or struct and the rest
-    /// of the block as the second element of the pair.
+    /// Entering a map or struct after `enter_special` will start parsing a
+    /// block and will treat the first block item as the map or struct and the
+    /// rest of the block as the second element of the pair.
     ///
     /// If `enter_map` or `enter_struct` was called for the first pair
     /// element, `enter_map` or `enter_struct` must not be called for the
     /// second element since the fused block syntax would make the separation
     /// of the second map from the first undetectable.
-    pub fn enter_pair(&mut self) -> Result<()> {
+    pub fn enter_special(&mut self) -> Result<()> {
+        if self.at_pair_start {
+            self.at_pair_start = false;
+        } else {
+            return err!("Special mode marker not at start of pair");
+        }
+
         let top = self.stack.len() - 1;
-        let new_top = self.stack[top].enter_pair()?;
+        let new_top = self.stack[top].enter_special()?;
         self.stack.push(new_top);
         Ok(())
     }
@@ -115,6 +151,8 @@ impl<'a> Parser<'a> {
     /// as a single key-value pair in a map, with the variant name
     /// corresponding to the key and the value to the value.
     pub fn enter_nonunit_enum(&mut self) -> Result<()> {
+        self.normal_mode()?;
+
         let top = self.stack.len() - 1;
         let new_top = self.stack[top].enter_nonunit_enum()?;
         self.stack.push(new_top);
@@ -129,6 +167,8 @@ impl<'a> Parser<'a> {
     ///
     /// Calling exit without a preceding enter call will panic.
     pub fn exit(&mut self) -> Result<()> {
+        self.normal_mode()?;
+
         let top = self.stack.len() - 1;
         if !self.stack[top].is_empty() {
             return err!("Unparsed input remains");
@@ -139,13 +179,18 @@ impl<'a> Parser<'a> {
 
     /// Return true if the current scope has no more items.
     pub fn is_empty(&self) -> bool {
-        self.stack[self.stack.len() - 1].is_empty()
+        // Can't tell what the state is before taking another deser step if
+        // `at_pair_start` is set.
+        !self.at_pair_start && self.stack[self.stack.len() - 1].is_empty()
     }
 
     /// Return true if the current scope has no more items, not even commented
     /// out items.
     pub fn is_really_empty(&self) -> bool {
-        self.stack[self.stack.len() - 1].is_really_empty()
+        // Can't tell what the state is before taking another deser step if
+        // `at_pair_start` is set.
+        !self.at_pair_start
+            && self.stack[self.stack.len() - 1].is_really_empty()
     }
 
     /// Return if the current state is exactly one word
@@ -156,6 +201,16 @@ impl<'a> Parser<'a> {
         let text = head.next().unwrap_or_else(|_| Cow::from(""));
         let text = text.trim();
         !text.is_empty() && !text.chars().any(|c| c.is_whitespace())
+    }
+
+    /// Enter a sequence if in pair-start state. Otherwise do nothing.
+    pub fn normal_mode(&mut self) -> Result<()> {
+        if self.at_pair_start {
+            self.at_pair_start = false;
+            self.enter_seq()
+        } else {
+            Ok(())
+        }
     }
 }
 
@@ -171,7 +226,8 @@ enum State<'a> {
     /// Complete document
     Document(Fragment<'a>),
 
-    /// An outline being split into individual items.
+    /// The rest of an outline being split into individual items. Cannot
+    /// diverge into the special form.
     Sequence(Outline<'a>),
 
     /// A line being split into individual words.
@@ -190,12 +246,12 @@ enum State<'a> {
     /// it's a section item, the value is the section body.
     MapValue(Outline<'a>),
 
-    /// First element of a pair.
+    /// First element of the special form.
     ///
     /// Waiting for next operation to decide how to proceed.
-    PairFirst(Fragment<'a>),
-    /// Second element of a pair.
-    PairSecond(Outline<'a>),
+    SpecialFirst(Fragment<'a>),
+    /// Second element of the special form.
+    SpecialSecond(Outline<'a>),
 }
 
 impl Default for State<'_> {
@@ -299,16 +355,16 @@ impl<'a> State<'a> {
                     }
                 }
             }
-            State::PairFirst(Fragment::Item(i)) => {
+            State::SpecialFirst(Fragment::Item(i)) => {
                 ret = Ok(Cow::from(i.head));
-                State::PairSecond(i.body)
+                State::SpecialSecond(i.body)
             }
-            State::PairFirst(Fragment::Outline(mut o)) => {
+            State::SpecialFirst(Fragment::Outline(mut o)) => {
                 match o.pop() {
                     Some(i) => {
                         ret = Ok(Cow::from(i.to_string()));
                         // The remaining content.
-                        State::PairSecond(o)
+                        State::SpecialSecond(o)
                     }
                     None => {
                         // XXX: Is it okay to do a blank here, or should we error
@@ -316,11 +372,11 @@ impl<'a> State<'a> {
                         // instead of gone into a seq/map that will then
                         // terminate with no items?
                         ret = Ok(Cow::from(""));
-                        State::PairSecond(o)
+                        State::SpecialSecond(o)
                     }
                 }
             }
-            State::PairSecond(o) => {
+            State::SpecialSecond(o) => {
                 ret = Ok(Cow::from(o.to_string()));
                 Default::default()
             }
@@ -397,14 +453,14 @@ impl<'a> State<'a> {
                     }
                 }
             }
-            State::PairSecond(o) => {
+            State::SpecialSecond(o) => {
                 ret = Ok(State::Sequence(o));
                 Default::default()
             }
 
             State::Words(_)
             | State::InlineStruct { .. }
-            | State::PairFirst(_) => {
+            | State::SpecialFirst(_) => {
                 ret = err!("enter_seq: Invalid type");
                 s
             }
@@ -460,7 +516,7 @@ impl<'a> State<'a> {
                     }
                 }
             }
-            State::PairFirst(Fragment::Outline(mut o)) => {
+            State::SpecialFirst(Fragment::Outline(mut o)) => {
                 // XXX: Copy-pasted from Sequence branch.
                 let prev_o = o.clone();
 
@@ -468,23 +524,23 @@ impl<'a> State<'a> {
                     Some(Fragment::Outline(a)) => {
                         // Nested block, that's a map.
                         ret = Ok(State::MapKey(a));
-                        State::PairSecond(o)
+                        State::SpecialSecond(o)
                     }
                     Some(Fragment::Item(_)) => {
                         // Inline item, inject an empty map, don't consume the
                         // item.
                         ret = Ok(State::MapKey(Default::default()));
-                        State::PairSecond(prev_o)
+                        State::SpecialSecond(prev_o)
                     }
                     None => {
                         // We can fit in an empty map.
                         ret = Ok(State::MapKey(Default::default()));
-                        State::PairSecond(o)
+                        State::SpecialSecond(o)
                     }
                 }
             }
 
-            State::PairFirst(Fragment::Item(i)) => {
+            State::SpecialFirst(Fragment::Item(i)) => {
                 // Synthesize an outline.
                 let outline = Outline(vec![i]);
                 if let Some(Fragment::Outline(a)) =
@@ -493,12 +549,12 @@ impl<'a> State<'a> {
                     // The single item in it looks like a map, go read it as
                     // one.
                     ret = Ok(State::MapKey(a));
-                    State::PairSecond(Default::default())
+                    State::SpecialSecond(Default::default())
                 } else {
                     // Nothing map-like in sight, pass an empty map and read
                     // the content as the tail of the pair.
                     ret = Ok(State::MapKey(Default::default()));
-                    State::PairSecond(outline)
+                    State::SpecialSecond(outline)
                 }
             }
 
@@ -530,7 +586,7 @@ impl<'a> State<'a> {
                     }
                 }
             }
-            State::PairSecond(mut o) => {
+            State::SpecialSecond(mut o) => {
                 o.try_unfold_only_child_outline();
                 ret = Ok(State::MapKey(o));
                 Default::default()
@@ -599,7 +655,7 @@ impl<'a> State<'a> {
                     }
                 }
             }
-            State::PairFirst(Fragment::Outline(mut o)) => {
+            State::SpecialFirst(Fragment::Outline(mut o)) => {
                 let prev_o = o.clone();
 
                 // Behave exactly like a map in pair head position, do not
@@ -608,18 +664,18 @@ impl<'a> State<'a> {
                     Some(Fragment::Outline(a)) => {
                         // Nested block, that's a map.
                         ret = Ok(State::MapKey(a));
-                        State::PairSecond(o)
+                        State::SpecialSecond(o)
                     }
                     Some(Fragment::Item(_)) => {
                         // Inline item, inject an empty map, don't consume the
                         // item.
                         ret = Ok(State::MapKey(Default::default()));
-                        State::PairSecond(prev_o)
+                        State::SpecialSecond(prev_o)
                     }
                     None => {
                         // Empty struct
                         ret = Ok(State::MapKey(Default::default()));
-                        State::PairSecond(o)
+                        State::SpecialSecond(o)
                     }
                 }
             }
@@ -660,7 +716,7 @@ impl<'a> State<'a> {
                     }
                 }
             }
-            State::PairSecond(mut o) => {
+            State::SpecialSecond(mut o) => {
                 o.try_unfold_only_child_outline();
                 ret = Ok(State::MapKey(o));
                 Default::default()
@@ -668,7 +724,7 @@ impl<'a> State<'a> {
 
             State::Words(_)
             | State::InlineStruct { .. }
-            | State::PairFirst(Fragment::Item(_)) => s,
+            | State::SpecialFirst(Fragment::Item(_)) => s,
         });
 
         ret
@@ -704,19 +760,19 @@ impl<'a> State<'a> {
             }
             State::MapKey(_) => todo!(),
             State::MapValue(_) => todo!(),
-            State::PairFirst(_) => todo!(),
-            State::PairSecond(_) => todo!(),
+            State::SpecialFirst(_) => todo!(),
+            State::SpecialSecond(_) => todo!(),
             State::Words(_) | State::InlineStruct { .. } => s,
         });
 
         ret
     }
 
-    fn enter_pair(&mut self) -> Result<State<'a>> {
+    fn enter_special(&mut self) -> Result<State<'a>> {
         let mut ret = err!("Invalid pair");
         take_mut::take(self, |s| match s {
             State::Document(Fragment::Item(i)) => {
-                ret = Ok(State::PairFirst(i.into()));
+                ret = Ok(State::SpecialFirst(i.into()));
                 State::Document(Default::default())
             }
             State::Document(Fragment::Outline(mut o)) => {
@@ -725,13 +781,13 @@ impl<'a> State<'a> {
                 } else {
                     Fragment::Outline(o)
                 };
-                ret = Ok(State::PairFirst(content));
+                ret = Ok(State::SpecialFirst(content));
                 State::Document(Default::default())
             }
             State::Sequence(mut o) => {
                 // Sequence -> pair, prepare for raw mode, no blank filtering.
                 if let Some(i) = o.pop() {
-                    ret = Ok(State::PairFirst(i.into()));
+                    ret = Ok(State::SpecialFirst(i.into()));
                 }
                 State::Sequence(o)
             }
@@ -741,21 +797,21 @@ impl<'a> State<'a> {
                     Some(i) if !i.is_line() => {
                         // Vertical sequence from body of section (head was
                         // key)
-                        ret = Ok(State::PairFirst(i.body.into()));
+                        ret = Ok(State::SpecialFirst(i.body.into()));
                         State::MapKey(o)
                     }
                     _ => Default::default(),
                 }
             }
-            State::PairSecond(o) => {
-                ret = Ok(State::PairFirst(o.into()));
+            State::SpecialSecond(o) => {
+                ret = Ok(State::SpecialFirst(o.into()));
                 State::Document(Default::default())
             }
             // Others are no-go.
             State::Words(_)
             | State::InlineStruct { .. }
             | State::MapKey(_)
-            | State::PairFirst(_) => s,
+            | State::SpecialFirst(_) => s,
         });
 
         ret
@@ -773,8 +829,8 @@ impl<'a> State<'a> {
             State::MapValue(_) => false,
             // Pair halves are considered nonempty if pair was entered
             // succesfully.
-            State::PairFirst(_) => false,
-            State::PairSecond(_) => false,
+            State::SpecialFirst(_) => false,
+            State::SpecialSecond(_) => false,
         }
     }
 
@@ -790,8 +846,8 @@ impl<'a> State<'a> {
             State::MapValue(_) => false,
             // Pair halves are considered nonempty if pair was entered
             // succesfully.
-            State::PairFirst(_) => false,
-            State::PairSecond(_) => false,
+            State::SpecialFirst(_) => false,
+            State::SpecialSecond(_) => false,
         }
     }
 }
@@ -825,13 +881,13 @@ impl fmt::Display for State<'_> {
             }
             State::MapKey(o) => write!(f, "MapKey(\n{})", o),
             State::MapValue(o) => write!(f, "MapValue(\n{})", o),
-            State::PairFirst(Fragment::Outline(o)) => {
+            State::SpecialFirst(Fragment::Outline(o)) => {
                 write!(f, "PairFirst(\n{})", o)
             }
-            State::PairFirst(Fragment::Item(i)) => {
+            State::SpecialFirst(Fragment::Item(i)) => {
                 write!(f, "PairFirst({})", i)
             }
-            State::PairSecond(o) => write!(f, "PairSecond(\n{})", o),
+            State::SpecialSecond(o) => write!(f, "PairSecond(\n{})", o),
         }
     }
 }
@@ -865,6 +921,7 @@ mod tests {
 
         fn pair(&mut self, p: impl FnOnce(&mut Self)) {
             self.enter_pair().unwrap();
+            self.enter_special().unwrap();
             p(self);
             self.exit().unwrap();
         }
