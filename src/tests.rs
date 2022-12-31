@@ -1245,33 +1245,35 @@ where
     // Normalize multi-line IDMs to always have a trailing newline. This
     // should make them equal to their reserialization.
     let mut idm = idm.to_string();
-    if !is_inline && idm.chars().last() != Some('\n') {
+    if !is_inline && !idm.ends_with('\n') {
         idm.push('\n');
     }
 
     let deser = from_str::<T>(&idm).expect("IDM did not deserialize to type");
     assert_eq!(&deser, val);
 
-    // Use to_string_styled_like to pick the indent style from the input's
-    // example, serialize tabs when parsing tabs, spaces when parsing spaces.
-    let reser = to_string_styled_like(&idm, val)
-        .expect("Value did not serialize to IDM");
+    if CHECK_SERIALIZATION {
+        // Use to_string_styled_like to pick the indent style from the input's
+        // example, serialize tabs when parsing tabs, spaces when parsing spaces.
+        let reser = to_string_styled_like(&idm, val)
+            .expect("Value did not serialize to IDM");
 
-    if idm != reser {
-        println!("Deserialized \n\x1b[1;32m{}\x1b[0m", idm);
-        println!("Reserialized \n\x1b[1;31m{}\x1b[0m", reser);
+        if idm != reser {
+            println!("Deserialized \n\x1b[1;32m{}\x1b[0m", idm);
+            println!("Reserialized \n\x1b[1;31m{}\x1b[0m", reser);
+        }
+
+        assert_eq!(idm, reser);
+
+        // Also check for default style ser, two characters per indent can trip
+        // some deserialization bugs that generate 1-character dummy indents where
+        // they shouldn't.
+        let reser = to_string(val).expect("Value did not serialize to IDM");
+
+        let new_deser = from_str::<T>(&reser)
+            .expect("Serialized IDM did not deserialize to type");
+        assert_eq!(&new_deser, val);
     }
-
-    assert_eq!(idm, reser);
-
-    // Also check for default style ser, two characters per indent can trip
-    // some deserialization bugs that generate 1-character dummy indents where
-    // they shouldn't.
-    let reser = to_string(val).expect("Value did not serialize to IDM");
-
-    let new_deser = from_str::<T>(&reser)
-        .expect("Serialized IDM did not deserialize to type");
-    assert_eq!(&new_deser, val);
 }
 
 /// Test that deserialization matches value and value's serialization
@@ -1286,16 +1288,25 @@ where
     let deser = from_str::<T>(idm).expect("IDM did not deserialize to type");
     assert_eq!(&deser, val);
 
-    let reser = to_string(val).expect("Value did not serialize to IDM");
-    // Reserialization may differ from original IDM (different order
-    // of fields, removed comments etc).
-    let new_deser = from_str::<T>(&reser)
-        .expect("Serialized IDM did not deserialize to type");
-    // It must still deserialize to same value.
-    assert_eq!(&new_deser, val);
+    if CHECK_SERIALIZATION {
+        let reser = to_string(val).expect("Value did not serialize to IDM");
+        // Reserialization may differ from original IDM (different order
+        // of fields, removed comments etc).
+        let new_deser = from_str::<T>(&reser)
+            .expect("Serialized IDM did not deserialize to type");
+        // It must still deserialize to same value.
+        assert_eq!(&new_deser, val);
+    }
 }
 
 // Conveninence constructor for String literals.
 fn s(s: &str) -> String {
     s.to_string()
 }
+
+/// Secret developer option, when set to false tests will only test
+/// deserialization. Use during new feature development when deserialization
+/// works but serialization is not being worked on yet.
+///
+/// Always keep `true` on committed code.
+const CHECK_SERIALIZATION: bool = true;
