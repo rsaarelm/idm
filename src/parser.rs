@@ -21,8 +21,11 @@ impl<'a> Parser<'a> {
 
     pub fn read<T: FromStr>(&mut self) -> Result<T> {
         let s = self.read_str()?;
+
+        // Do an extra trim here, values might have NBSP padding that passes
+        // through main IDM parsing but does not apply to primitives.
+        T::from_str(s.trim()).map_err(|_| Error::new("Failed to parse value"))
         // TODO Attach line number to error
-        T::from_str(&*s).map_err(|_| Error::new("Failed to parse value"))
     }
 
     /// Return the next concrete string token from current sequence or `None`

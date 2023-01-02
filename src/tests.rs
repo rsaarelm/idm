@@ -77,6 +77,26 @@ fn primitives() {
 }
 
 #[test]
+fn trim_nbsp() {
+    // You can left-pad a table column with NBSP to keep it valid IDM and it
+    // will still parse fine if it uses primitive types.
+
+    test!(
+        &vec![1.0, 10.0, -2.0, 666.0],
+        _,
+        "\
+\u{a0}\u{a0}1.0
+\u{a0}10.0
+\u{a0}-2.0
+666"
+    );
+    //   1.0
+    //  10.0
+    //  -2.0
+    // 666
+}
+
+#[test]
 fn inconsistent_indentation() {
     // FIXME: Re-enable line numbers in error reports.
     fails /*_at*/::<Outline>(

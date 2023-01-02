@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   consistent with current indentation style when serializing if necessary.
   String values that have leading whitespace or are not valid IDM outline
   fragments will fail to serialize.
+- NBSP and other unicode whitespace is trimmed when parsing primitive values
+  (integers, floats). This allows table rows with a right-aligned leftmost
+  column that are left-padded with NBSP to be valid IDM.
 - Minor improvement in error value API ergonomics
 
 ## [0.3.2] - 2022-11-03

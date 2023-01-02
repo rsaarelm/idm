@@ -392,6 +392,14 @@ variant of a structured type.
   half is fused in the first, the second map cannot be syntactically
   distinguished from the first.
 
+* Primitive types, chars, numeric types and booleans, are trimmed of unicode
+  whitespace like NBSP before being parsed. The main IDM algorithm treats NBSP
+  as content instead of indentation. This allows you to do left-padded table
+  rows without breaking IDM parsing by padding with NBSP, and still having
+  primitive elements parse correctly from the leftmost table column. User
+  types with custom parsing from a string value may need to trim the input
+  string on their own.
+
 * To set up the locally versioned githooks, do
 
 ```notrust
