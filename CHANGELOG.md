@@ -6,12 +6,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Additions
+- Publicly visible `Serializer` type.
+
 ### Changes
-- The indentations of multiline string values are now munged to remain
-  consistent with current indentation style when serializing if necessary.
-  String values that have leading whitespace or are not valid IDM outline
-  fragments will fail to serialize.
-- NBSP and other unicode whitespace is trimmed when parsing primitive values
+- The IDM special structures are now marked with a singleton tuple as the
+  first element of a tuple or tuple struct pair. Regular non-struct tuples no
+  longer have intrinsic special treatment and work like sequences.
+- The indentations of multiline string values are munged to remain consistent
+  with current indentation style when serializing if necessary. String values
+  that have leading whitespace or are not valid IDM outline fragments will
+  fail to serialize.
+- NBSP and other unicode whitespace is removed when parsing primitive values
   (integers, floats). This allows table rows with a right-aligned leftmost
   column that are left-padded with NBSP to be valid IDM.
 - Minor improvement in error value API ergonomics

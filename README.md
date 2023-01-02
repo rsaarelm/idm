@@ -146,14 +146,13 @@ Not part of block
 
 ## Special forms
 
-IDM does not support Rust's tuple type as a regular sequence deserialization
-target. Instead, pair tuples (other arities are not supported) are used to
-represent special forms in IDM documents.
+IDM repurposes singleton tuples (`(A,),`) as a marker for special forms in IDM
+documents.
 
-A pair with a `String` in the head position reads an item in *raw mode*. The
-headline of the current item, even if it's a comment or a blank line, is read
-into the pair's head string. The body of the section is parsed normally into
-the tail of the pair.
+A pair with a `String` in the head singleton (`(String,),`) reads an item in
+*raw mode*. The headline of the current item, even if it's a comment or a
+blank line, is read into the pair's head string. The body of the section is
+parsed normally into the tail of the pair.
 
 ```notrust
 -- This gets read into the String at pair head (even with comment syntax)
@@ -162,11 +161,11 @@ the tail of the pair.
   Of the pair type
 ```
 
-A pair with a map-like type (struct or map) in the head position will read an
+A pair with a map-like type (struct or map) in the head singleton will read an
 outline (not an item as the string-headed pair), where it will expect to find
 the initial map-like value in an indented block, and will then read all the
 remaining outline items into the tail of the pair as a single block. So a type
-like `(BTreeMap<String, String>, Vec<String>)` would expect something like
+like `((BTreeMap<String, String>,), Vec<String>)` would expect something like
 
 ```notrust
 --
@@ -208,6 +207,12 @@ only the values of struct fields, the field names are not included. The values
 are listed in the exact order they show up in struct declaration. This form is
 usually used when writing tabular data.
 
+IDM has very limited capabilities for representing missing values, so the
+convention for `Option` values is to omit the entire item (both key and value)
+from a map or a struct if the value is `None`. Structs written in horizontal
+form cannot have missing values. Completely empty structs or maps are possible
+in the special pair head singleton position but not elsewhere.
+
 ## Complex structure example
 
 Complex structures can be written using maps from object names to objects,
@@ -238,7 +243,7 @@ The type signature and parse test:
 use serde::Deserialize;
 use std::collections::BTreeMap;
 
-type StarSystem = (Star, BTreeMap<String, Planet>);
+type StarSystem = ((Star,), BTreeMap<String, Planet>);
 type Starmap = BTreeMap<String, StarSystem>;
 
 #[derive(PartialEq, Debug, Deserialize)]
@@ -270,12 +275,12 @@ Alpha Centauri
 ").unwrap(),
   BTreeMap::from([
     ("Sol".into(),
-        (Star { age: 4.6e9, mass: 1.0 },
+        ((Star { age: 4.6e9, mass: 1.0 },),
          BTreeMap::from([
            ("Earth".into(), Planet { orbit: 1.0, mass: 1.0 }),
            ("Mars".into(),  Planet { orbit: 1.52, mass: 0.1 })]))),
     ("Alpha Centauri".into(),
-        (Star { age: 5.3e9, mass: 1.1 },
+        ((Star { age: 5.3e9, mass: 1.1 },),
          BTreeMap::from([
            ("Chiron".into(),  Planet { orbit: 1.32, mass: 1.33 })])))]));
 ```
@@ -289,13 +294,13 @@ generic outline types, which can parse most plaintext files.
 A simple outline has a type signature like
 
 ```rust
-struct Outline(Vec<(String, Outline)>);
+struct Outline(Vec<((String,), Outline)>);
 ```
 
 This matches the form of a generic IDM outline, with the outline items being
-the `(String, Outline)` pairs. The pair tuple with the string head makes IDM
-parse each item in raw mode, so that comment and blank lines are included in
-the data structure and will get echoed back when the structure gets
+the `((String,), Outline)` pairs. The pair tuple with the string head makes
+IDM parse each item in raw mode, so that comment and blank lines are included
+in the data structure and will get echoed back when the structure gets
 reserialized.
 
 A richer structure is a data outline, which supports an arbitrary data map for
@@ -304,12 +309,8 @@ each item:
 ```rust
 use indexmap::IndexMap;
 
-struct DataOutline((IndexMap<String, String>, Vec<(String, DataOutline)>));
+struct DataOutline((IndexMap<String, String>,), Vec<((String,), DataOutline)>);
 ```
-
-(The structural pair type needs to be a plain tuple inside the struct, struct
-tuples are reserved for data-like elements that do not trigger the structural
-parsing modes.)
 
 You can now read the named attributes from any item in the outline. The values
 will all be strings, but an application which knows the expected type for a
@@ -321,20 +322,26 @@ use indexmap::IndexMap;
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
-struct DataOutline((IndexMap<String, String>, Vec<(String, DataOutline)>));
+struct DataOutline(
+    (IndexMap<String, String>,),
+    Vec<((String,), DataOutline)>,
+);
 
-let outline = idm::from_str::<DataOutline>("\
+let outline = idm::from_str::<DataOutline>(
+    "\
 Example outline
   Stuff
     :tags foo bar
     This part has stuff
-  Things").unwrap();
+  Things",
+)
+.unwrap();
 
 // Raw access patterns are pretty rough.
 // A proper app would need some sort of selection API here,
 // the explicit indexing gets very rough very fast.
-assert_eq!(outline.0.1[0].1.0.1[0].0, "Stuff");     // On the right track...
-let tags = &outline.0.1[0].1.0.1[0].1.0.0["tags"];  // Grab tags field.
+assert_eq!(outline.1[0].1 .1[0].0 .0, "Stuff"); // On the right track...
+let tags = &outline.1[0].1 .1[0].1 .0 .0["tags"]; // Grab tags field.
 assert_eq!(tags, "foo bar");
 
 // Cast to a more appropriate format.
