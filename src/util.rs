@@ -127,6 +127,10 @@ impl<T: Default> DerefMut for DefaultDash<T> {
     }
 }
 
+/// Wrapper type that will replace spaces with underscores when serializing.
+///
+/// Do not use with an inner type that has actual underscores in its string
+/// representation, these will be turned into spaces during the roundtrip.
 #[derive(Copy, Clone, Default, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
 pub struct UnderlineSpaces<T>(pub T);
 
