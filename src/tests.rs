@@ -250,6 +250,24 @@ consectetur adipiscing elit"
 }
 
 #[test]
+fn tail_lining() {
+    test!(&(s("foo"), s("bar"), s("baz")), "foo bar baz");
+
+    test!(
+        &(s("foo"), s("bar"), s("squeamish ossifrage")),
+        "foo bar squeamish ossifrage"
+    );
+
+    test!(
+        &vec![(s("foo"), s("bar"), s("squeamish ossifrage"))],
+        _,
+        "\
+foo bar
+  squeamish ossifrage"
+    );
+}
+
+#[test]
 fn section_atoms() {
     // Atoms can be section-like.
     test!(
@@ -849,7 +867,7 @@ lazy_static! {
         vec![
             (s("Sol"),
             ((Star { age: 4.6e9, mass: 1.0},),
-             IndexMap::from_iter(vec![
+             IndexMap::from_iter([
                  (s("Mercury"), Planet { orbit: 0.39, mass: 0.055 }),
                  (s("Venus"),   Planet { orbit: 0.72, mass: 0.815 }),
                  (s("Earth"),   Planet { orbit: 1.0,  mass: 1.0 }),
@@ -857,7 +875,7 @@ lazy_static! {
             ].into_iter()))),
             (s("Alpha Centauri"),
             ((Star { age: 5.3e9, mass: 1.1},),
-             IndexMap::from_iter(vec![
+             IndexMap::from_iter([
                  (s("Eurytion"), Planet { orbit: 0.47, mass: 0.08 }),
                  (s("Chiron"),   Planet { orbit: 1.32, mass: 1.33 }),
             ].into_iter()))),

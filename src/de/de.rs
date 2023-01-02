@@ -206,13 +206,8 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
             // form. If this shows up at the start of a sequence, change the
             // sequence into the special pair.
             self.enter_special()?;
-        } else if len == 2 {
-            // The head value can be a singleton tuple and mark special mode,
-            // but only if the containing sequence is a pair. Have special
-            // treatment for pairs.
-            self.enter_pair()?;
         } else {
-            self.enter_seq()?;
+            self.enter_tuple(len)?;
         }
         let ret = visitor.visit_seq(Sequence::new(self))?;
         if len > 1 {
@@ -278,7 +273,7 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
             visitor.visit_enum(self.read_str()?.into_deserializer())
         } else {
             // Nonunit enums look similar to the key-value pairs of a map.
-            self.enter_nonunit_enum()?;
+            self.enter_tuple(2)?;
             let ret = visitor.visit_enum(Enum::new(self))?;
             self.exit()?;
             Ok(ret)
@@ -338,6 +333,7 @@ impl<'a, 'de> de::MapAccess<'de> for Sequence<'a, 'de> {
             return Ok(None);
         }
 
+        self.de.enter_tuple(2)?;
         seed.deserialize(&mut *self.de).map(Some)
     }
 
@@ -345,7 +341,9 @@ impl<'a, 'de> de::MapAccess<'de> for Sequence<'a, 'de> {
     where
         V: de::DeserializeSeed<'de>,
     {
-        seed.deserialize(&mut *self.de)
+        let ret = seed.deserialize(&mut *self.de)?;
+        self.de.exit()?;
+        Ok(ret)
     }
 }
 

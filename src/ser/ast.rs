@@ -170,7 +170,20 @@ impl Expr {
             s if s.is_empty() => false,
             s if s.is_word() => true,
             Expr::Line(_) => true,
-            Expr::Seq(es) | Expr::Tuple(es) => es.iter().all(|e| e.is_word()),
+            Expr::Seq(es) if es.iter().all(|e| e.is_word()) => true,
+            Expr::Tuple(es) => {
+                let last = es.len() - 1;
+                for (i, e) in es.iter().enumerate() {
+                    if i < last && !e.is_word() {
+                        return false;
+                    } else if i == last && !e.is_line() {
+                        // Last tuple item can be line-like and whole tuple is
+                        // still parsed as line.
+                        return false;
+                    }
+                }
+                true
+            }
             Expr::EnumVariant(_, e) => e.is_line(),
             _ => false,
         }

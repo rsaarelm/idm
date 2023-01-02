@@ -199,10 +199,6 @@ impl<'a> Outline<'a> {
         }
     }
 
-    pub(crate) fn push(&mut self, i: Item<'a>) {
-        self.0.push(i)
-    }
-
     pub fn is_empty_or_blank(&self) -> bool {
         self.0.iter().all(|i| i.is_comment() || i.is_blank())
     }
@@ -321,8 +317,20 @@ impl<'a> Item<'a> {
         self.body.is_empty()
     }
 
+    pub fn is_section(&self) -> bool {
+        !self.is_line()
+    }
+
+    pub fn is_block(&self) -> bool {
+        self.has_blank_line() && !self.body.is_empty()
+    }
+
     pub fn is_blank(&self) -> bool {
-        self.is_line() && self.head.chars().all(CharExt::is_idm_whitespace)
+        self.is_line() && self.has_blank_line()
+    }
+
+    pub fn has_blank_line(&self) -> bool {
+        self.head.chars().all(CharExt::is_idm_whitespace)
     }
 
     pub fn is_colon_item(&self) -> bool {
@@ -341,6 +349,14 @@ impl<'a> Item<'a> {
             Some(word)
         } else {
             None
+        }
+    }
+
+    pub fn detach_head(&self) -> Item<'a> {
+        Item {
+            head: self.head,
+            body_indent: self.body_indent,
+            body: Default::default(),
         }
     }
 }

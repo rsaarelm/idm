@@ -13,6 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The IDM special structures are now marked with a singleton tuple as the
   first element of a tuple or tuple struct pair. Regular non-struct tuples no
   longer have intrinsic special treatment and work like sequences.
+- Tuples can match a multi-word value as their last value when line-shaped and
+  the body of a section as their last value when section-shaped.
+  Section-shaped pairs will match the whole headline as the first value and
+  the body as the second value. Parsing map items is now equivalent to parsing
+  a sequence of pair tuples.
 - The indentations of multiline string values are munged to remain consistent
   with current indentation style when serializing if necessary. String values
   that have leading whitespace or are not valid IDM outline fragments will

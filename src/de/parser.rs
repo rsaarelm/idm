@@ -10,6 +10,7 @@ use crate::{
     err, Error, Result,
 };
 
+#[derive(Debug)]
 pub struct Parser<'a> {
     stack: Vec<State<'a>>,
     /// Flag for the weird special stuff part.
@@ -61,20 +62,57 @@ impl<'a> Parser<'a> {
         self.normal_mode()?;
 
         let top = self.stack.len() - 1;
-        let new_top = self.stack[top].enter_seq()?;
+        let new_top = self.stack[top].enter_seq(SeqConfig::Seq)?;
         self.stack.push(new_top);
         Ok(())
     }
 
-    /// Method for sequences that might switch to special mode at their head.
+    /// Enter a tuple with a known length.
     ///
-    /// Don't do any operations here, just set the `at_pair_start` flag. The
-    /// operation will be deferred to the when either `normal_mode` or
-    /// `special_mode` is called.
-    pub fn enter_pair(&mut self) -> Result<()> {
+    /// Tuples can have special parsing for first and last items and can parse
+    /// a section-shaped value.
+    pub fn enter_tuple(&mut self, n: usize) -> Result<()> {
         self.normal_mode()?;
 
-        self.at_pair_start = true;
+        if n == 2 {
+            // Fake pair logic for inline struct traversal.
+            let top = self.stack.len() - 1;
+            if let State::InlineStruct {
+                ref mut fake_seq, ..
+            } = self.stack[top]
+            {
+                if !*fake_seq {
+                    *fake_seq = true;
+                    return Ok(());
+                } else {
+                    return err!("Invalid nesting");
+                }
+            }
+
+            // Pairs can switch into special mode. When a pair tuple is
+            // entered, instead of doing anything immediately, just toggle the
+            // at_pair_start flag.
+            self.at_pair_start = true;
+            Ok(())
+        } else {
+            self.really_enter_tuple(n)
+        }
+    }
+
+    /// Enter a sequence if in pair-start state. Otherwise do nothing.
+    pub fn normal_mode(&mut self) -> Result<()> {
+        if self.at_pair_start {
+            self.at_pair_start = false;
+            self.really_enter_tuple(2)
+        } else {
+            Ok(())
+        }
+    }
+
+    fn really_enter_tuple(&mut self, n: usize) -> Result<()> {
+        let top = self.stack.len() - 1;
+        let new_top = self.stack[top].enter_seq(SeqConfig::Tuple(n))?;
+        self.stack.push(new_top);
         Ok(())
     }
 
@@ -88,7 +126,7 @@ impl<'a> Parser<'a> {
         self.normal_mode()?;
 
         let top = self.stack.len() - 1;
-        let new_top = self.stack[top].enter_map()?;
+        let new_top = self.stack[top].enter_seq(Map)?;
         self.stack.push(new_top);
         Ok(())
     }
@@ -110,7 +148,7 @@ impl<'a> Parser<'a> {
         self.normal_mode()?;
 
         let top = self.stack.len() - 1;
-        let new_top = self.stack[top].enter_struct(fields)?;
+        let new_top = self.stack[top].enter_seq(Struct(fields))?;
         self.stack.push(new_top);
         Ok(())
     }
@@ -147,20 +185,6 @@ impl<'a> Parser<'a> {
         Ok(())
     }
 
-    /// Enter a non-unit enum value.
-    ///
-    /// Non-unit (newtype, tuple or struct) enum values have a similar syntax
-    /// as a single key-value pair in a map, with the variant name
-    /// corresponding to the key and the value to the value.
-    pub fn enter_nonunit_enum(&mut self) -> Result<()> {
-        self.normal_mode()?;
-
-        let top = self.stack.len() - 1;
-        let new_top = self.stack[top].enter_nonunit_enum()?;
-        self.stack.push(new_top);
-        Ok(())
-    }
-
     /// Exit the current entered scope.
     ///
     /// The scope must not have any unparsed input (that would be returned by
@@ -172,6 +196,18 @@ impl<'a> Parser<'a> {
         self.normal_mode()?;
 
         let top = self.stack.len() - 1;
+
+        // Fake pair logic for inline struct traversal.
+        if let State::InlineStruct {
+            ref mut fake_seq, ..
+        } = self.stack[top]
+        {
+            if *fake_seq {
+                *fake_seq = false;
+                return Ok(());
+            }
+        }
+
         if !self.stack[top].is_empty() {
             return err!("Unparsed input remains");
         }
@@ -204,14 +240,62 @@ impl<'a> Parser<'a> {
         let text = text.trim();
         !text.is_empty() && !text.chars().any(|c| c.is_whitespace())
     }
+}
 
-    /// Enter a sequence if in pair-start state. Otherwise do nothing.
-    pub fn normal_mode(&mut self) -> Result<()> {
-        if self.at_pair_start {
-            self.at_pair_start = false;
-            self.enter_seq()
-        } else {
-            Ok(())
+#[derive(Copy, Clone, Debug)]
+enum SeqConfig {
+    /// Variable-length Vec or similar.
+    Seq,
+    /// Fixed-length tuple
+    Tuple(usize),
+    /// Homogeneous map.
+    Map,
+    /// Struct with a fixed set of fields.
+    Struct(&'static [&'static str]),
+}
+
+use SeqConfig::*;
+
+impl SeqConfig {
+    fn allows_inline(&self) -> bool {
+        !matches!(self, Map)
+    }
+
+    /// Turn an outline that's all one colon-indented block into a regular
+    /// block if there's no syntactic ambiguity for parsing. Used to maintain
+    /// the pretense that colons are map field syntax instead of an
+    /// indentation mechanism.
+    fn try_unfold(&self, outline: &mut Outline) {
+        if !matches!(self, Seq) {
+            outline.try_unfold_only_child_outline();
+        }
+    }
+
+    fn inline_state<'a>(&self, item: Item<'a>) -> Option<State<'a>> {
+        match self {
+            Seq if item.is_line() => Some(State::SectionSeq {
+                i: 0,
+                n: None,
+                item,
+            }),
+            Struct(fields) if item.is_line() => {
+                let mut words = parse::words(item.head).0;
+                words.reverse();
+                let mut fields = fields.to_vec();
+                fields.reverse();
+                Some(State::InlineStruct {
+                    words,
+                    fields,
+                    fake_seq: false,
+                })
+            }
+            // Only tuples can be built from section-shaped (non-line) items.
+            Tuple(n) => Some(State::SectionSeq {
+                i: 0,
+                n: Some(*n),
+                item,
+            }),
+            _ => None,
         }
     }
 }
@@ -229,25 +313,26 @@ enum State<'a> {
     Document(Fragment<'a>),
 
     /// Vertical list of items.
-    Sequence(Outline<'a>),
+    VerticalSeq(Outline<'a>),
 
     /// A line being split into individual words.
-    Words(Item<'a>),
+    SectionSeq {
+        /// Current element index.
+        i: usize,
+        /// Total element count (not available for inline vecs).
+        n: Option<usize>,
+        /// Remaining item.
+        item: Item<'a>,
+    },
 
     /// Value fields of an inline struct.
     InlineStruct {
         words: Vec<&'a str>,
         fields: Vec<&'static str>,
+        // Set to true to spoof entering and false to spoof exiting a pair
+        // when reading an inline struct.
+        fake_seq: bool,
     },
-
-    /// Map iteration returning a key next.
-    MapKey(Outline<'a>),
-
-    /// Map iteration returning a value next.
-    ///
-    /// If the top of the outline is a line item, the value is the line, if
-    /// it's a section item, the value is the section body.
-    MapValue(Outline<'a>),
 
     /// First element of the special form.
     ///
@@ -276,21 +361,57 @@ impl<'a> State<'a> {
                 }
                 Default::default()
             }
-            State::Sequence(mut o) => {
+            State::VerticalSeq(mut o) => {
                 if let Some(next) = o.pop_nonblank() {
                     ret = Ok(Cow::from(next.to_string()));
                 }
-                State::Sequence(o)
+                State::VerticalSeq(o)
             }
-            State::Words(mut words) => {
-                if let Some(word) = words.pop_word() {
+            State::SectionSeq { i, n, mut item } => {
+                // Special logic for tuples.
+                if let Some(len) = n {
+                    // Known length
+                    if i == 0 && len == 2 && item.is_section() {
+                        // Grab whole headline from section as first item of a
+                        // pair when the item is section-shaped.
+                        ret = Ok(Cow::from(item.head));
+                        // Blank out the headline, we're left with the body
+                        // for the second (and last) part.
+                        item.head = "";
+                        return State::SectionSeq { i: i + 1, n, item };
+                    } else if i == len - 1 {
+                        // Last item, apply tail-lining.
+                        if item.is_line() {
+                            // Tail-line the last part of a line item.
+                            if !item.is_blank() {
+                                ret = Ok(Cow::from(item.head));
+                            }
+                            return Default::default();
+                        } else {
+                            // Section-shaped item.
+                            if !item.has_blank_line() {
+                                // Mixed headline and body content in last
+                                // item, must be one or the other.
+                                ret =
+                                    err!("Unparsed input in section headline");
+                            } else {
+                                // Last value is entire section body.
+                                ret = Ok(Cow::from(item.body.to_string()));
+                            }
+                            return Default::default();
+                        }
+                    }
+                }
+
+                if let Some(word) = item.pop_word() {
                     ret = Ok(Cow::from(word));
                 }
-                State::Words(words)
+                State::SectionSeq { i: i + 1, n, item }
             }
             State::InlineStruct {
                 mut words,
                 mut fields,
+                fake_seq,
             } => {
                 // Alternate between struct field names (acquired from serde,
                 // not present in input) and field values.
@@ -302,61 +423,13 @@ impl<'a> State<'a> {
                 } else {
                     // If out of balance, assume a field name was handed out
                     // the last time, give the corresponding value.
-                    debug_assert!(fields.len() == words.len() - 1);
+                    debug_assert!(fields.len() + 1 == words.len());
                     ret = Ok(Cow::from(words.pop().unwrap()));
                 }
-                State::InlineStruct { words, fields }
-            }
-            State::MapKey(mut o) => {
-                match o.pop_nonblank() {
-                    Some(Fragment::Item(mut i)) if i.is_line() => {
-                        if let Ok((word, rest)) = parse::word(i.head) {
-                            // It's a line, first word is key.
-                            ret = Ok(Cow::from(word));
-                            // Push the rest of the line in, that's value.
-                            i.head = rest;
-                            o.push(i);
-                            // Switch to value
-                            State::MapValue(o)
-                        } else {
-                            ret = err!("Invalid map entry");
-                            Default::default()
-                        }
-                    }
-                    Some(Fragment::Item(i)) => {
-                        // Section, headline is key, body is value.
-                        ret = Ok(Cow::from(i.head));
-                        // Push the item back in, MapValue needs to know to
-                        // ditch headline when it sees a section.
-                        o.push(i);
-                        State::MapValue(o)
-                    }
-                    _ => {
-                        ret = err!("Invalid map entry");
-                        Default::default()
-                    }
-                }
-            }
-            State::MapValue(mut o) => {
-                // Regular pop, since MapKey should have already done the
-                // nonblank filtering before we get here.
-                match o.pop() {
-                    Some(i) if i.is_line() => {
-                        // If it's an item, the line should already have been
-                        // snipped down to value.
-                        ret = Ok(Cow::from(i.head));
-                        // Return to map key for rest of stack.
-                        State::MapKey(o)
-                    }
-                    Some(i) => {
-                        // It's a section, body is the value. Ignore head.
-                        ret = Ok(Cow::from(i.body.to_string()));
-                        State::MapKey(o)
-                    }
-                    _ => {
-                        ret = err!("Invalid map entry");
-                        Default::default()
-                    }
+                State::InlineStruct {
+                    words,
+                    fields,
+                    fake_seq,
                 }
             }
             State::SpecialFirst(Fragment::Item(i)) => {
@@ -389,378 +462,140 @@ impl<'a> State<'a> {
         ret
     }
 
-    fn enter_seq(&mut self) -> Result<State<'a>> {
+    fn enter_seq(&mut self, config: SeqConfig) -> Result<State<'a>> {
         let mut ret = err!("Out of input");
 
         take_mut::take(self, |s| match s {
             State::Document(f) if f.is_empty() => {
-                ret = Ok(State::Sequence(Default::default()));
+                ret = Ok(State::VerticalSeq(Default::default()));
                 Default::default()
             }
-            State::Document(Fragment::Item(i)) if i.is_line() => {
-                ret = Ok(State::Words(i));
+            State::Document(Fragment::Item(item)) => {
+                if let Some(next) = config.inline_state(item) {
+                    ret = Ok(next);
+                } else {
+                    ret = err!("Invalid sequence shape");
+                }
                 Default::default()
             }
-            State::Document(Fragment::Outline(o)) => {
-                ret = Ok(State::Sequence(o));
+            State::Document(Fragment::Outline(mut o)) => {
+                config.try_unfold(&mut o);
+                ret = Ok(State::VerticalSeq(o));
                 Default::default()
             }
-            State::Document(_) => {
-                ret = err!("Invalid sequence shape");
-                s
-            }
-            State::Sequence(mut o) => {
+            State::VerticalSeq(mut o) => {
+                let prev_o = o.clone();
                 match o.pop_nonblank() {
-                    Some(Fragment::Outline(a)) => {
+                    Some(Fragment::Outline(mut a)) => {
                         // Nested block.
-                        ret = Ok(State::Sequence(a));
+                        config.try_unfold(&mut a);
+                        ret = Ok(State::VerticalSeq(a));
                     }
-                    Some(Fragment::Item(i)) if i.is_line() => {
-                        // Horizontal inline sequence.
-                        ret = Ok(State::Words(i));
+                    None | Some(Fragment::Item(_))
+                        if !config.allows_inline() =>
+                    {
+                        ret = Ok(State::VerticalSeq(Default::default()));
+                        return State::VerticalSeq(prev_o);
                     }
-                    None => {}
+                    Some(Fragment::Item(item)) => {
+                        if let Some(next) = config.inline_state(item) {
+                            ret = Ok(next);
+                        }
+                    }
                     _ => {
                         ret = err!("Invalid sequence shape");
                     }
                 }
-                State::Sequence(o)
+                State::VerticalSeq(o)
             }
-            State::MapKey(_) => {
-                // Seq keys might be eventually supported?
-                ret = err!("Not supported");
-                s
-            }
-            State::MapValue(mut o) => {
-                match o.pop() {
-                    Some(i) if i.is_line() => {
-                        // Horizontal sequence from headline.
-                        ret = Ok(State::Words(i));
-                        // Return to map key for rest of stack.
-                        State::MapKey(o)
+            State::SectionSeq { i, n, mut item } => {
+                if let Some(len) = n {
+                    if i == 0
+                        && len == 2
+                        && item.is_section()
+                        && config.allows_inline()
+                    {
+                        // Whole headline at start of section-pair.
+                        ret = config
+                            .inline_state(item.detach_head())
+                            .ok_or_else(|| Error::new("Can't inline"));
+                        item.head = "";
+                        return State::SectionSeq { i: i + 1, n, item };
+                    } else if i == len - 1
+                        && item.is_line()
+                        && config.allows_inline()
+                    {
+                        // Trailing tail at the end of line-tuple.
+                        ret = config
+                            .inline_state(item)
+                            .ok_or_else(|| Error::new("Can't inline"));
+                        return Default::default();
+                    } else if i == len - 1 && item.is_block() {
+                        let mut body = item.body;
+                        config.try_unfold(&mut body);
+                        // Entire body at end of section-tuple.
+                        ret = Ok(State::VerticalSeq(body));
+                        return Default::default();
                     }
-                    Some(i) => {
-                        // Vertical sequence from body of section (head was
-                        // key)
-                        ret = Ok(State::Sequence(i.body));
-                        State::MapKey(o)
-                    }
-                    _ => {
-                        ret = err!("Invalid map entry");
-                        Default::default()
-                    }
+                } else {
+                    ret = err!("Invalid inline nesting");
                 }
-            }
-            State::SpecialSecond(o) => {
-                ret = Ok(State::Sequence(o));
+
+                // If no special case applies, deny further nesting.
                 Default::default()
-            }
-
-            State::Words(_)
-            | State::InlineStruct { .. }
-            | State::SpecialFirst(_) => {
-                ret = err!("enter_seq: Invalid type");
-                s
-            }
-        });
-
-        ret
-    }
-
-    fn enter_map(&mut self) -> Result<State<'a>> {
-        // Only allow outlines, generate empty one in inline-y context.
-        let mut ret = err!("Invalid map");
-
-        take_mut::take(self, |s| match s {
-            State::Document(f) if f.is_empty() => {
-                ret = Ok(State::MapKey(Default::default()));
-                Default::default()
-            }
-            State::Document(Fragment::Outline(mut o)) => {
-                // Sugar hack, if the outline consists entirely of a
-                // single colon-indented block, drop down into that.
-                // This will be done a lot in enter_map and enter_struct.
-                o.try_unfold_only_child_outline();
-                ret = Ok(State::MapKey(o));
-                Default::default()
-            }
-            State::Document(_) => {
-                // Don't know the context, so just fail out here instead of
-                // cramming an empty map before the horizontal fragment.
-                s
-            }
-
-            State::Sequence(mut o) => {
-                let prev_o = o.clone();
-
-                match o.pop_nonblank() {
-                    Some(Fragment::Outline(mut a)) => {
-                        a.try_unfold_only_child_outline();
-
-                        // Nested block, that's a map.
-                        ret = Ok(State::MapKey(a));
-                        State::Sequence(o)
-                    }
-                    Some(Fragment::Item(_)) => {
-                        // Inline item, inject an empty map, don't consume the
-                        // item.
-                        ret = Ok(State::MapKey(Default::default()));
-                        State::Sequence(prev_o)
-                    }
-                    None => {
-                        // We can fit in an empty map.
-                        ret = Ok(State::MapKey(Default::default()));
-                        State::Sequence(o)
-                    }
-                }
-            }
-            State::SpecialFirst(Fragment::Outline(mut o)) => {
-                // XXX: Copy-pasted from Sequence branch.
-                let prev_o = o.clone();
-
-                match o.pop_nonblank() {
-                    Some(Fragment::Outline(a)) => {
-                        // Nested block, that's a map.
-                        ret = Ok(State::MapKey(a));
-                        State::SpecialSecond(o)
-                    }
-                    Some(Fragment::Item(_)) => {
-                        // Inline item, inject an empty map, don't consume the
-                        // item.
-                        ret = Ok(State::MapKey(Default::default()));
-                        State::SpecialSecond(prev_o)
-                    }
-                    None => {
-                        // We can fit in an empty map.
-                        ret = Ok(State::MapKey(Default::default()));
-                        State::SpecialSecond(o)
-                    }
-                }
             }
 
             State::SpecialFirst(Fragment::Item(i)) => {
                 // Synthesize an outline.
                 let outline = Outline(vec![i]);
-                if let Some(Fragment::Outline(a)) =
+                if let Some(Fragment::Outline(mut a)) =
                     outline.clone().pop_nonblank()
                 {
-                    // The single item in it looks like a map, go read it as
-                    // one.
-                    ret = Ok(State::MapKey(a));
+                    // Single item looks like a vertical seq.
+                    config.try_unfold(&mut a);
+                    ret = Ok(State::VerticalSeq(a));
                     State::SpecialSecond(Default::default())
                 } else {
-                    // Nothing map-like in sight, pass an empty map and read
-                    // the content as the tail of the pair.
-                    ret = Ok(State::MapKey(Default::default()));
+                    // Nothing that looks like a vertical seq, pass an empty
+                    // container and read the contents as the tail of the
+                    // special form.
+                    ret = Ok(State::VerticalSeq(Default::default()));
                     State::SpecialSecond(outline)
                 }
             }
 
-            State::MapKey(_) => {
-                ret = err!("Not supported");
-                s
-            }
-            State::MapValue(mut o) => {
-                match o.pop() {
-                    Some(i) if !i.is_line() => {
-                        let mut val = i.body.clone();
-
-                        val.try_unfold_only_child_outline();
-
-                        // Vertical sequence from body of section (head was
-                        // key)
-                        ret = Ok(State::MapKey(val));
-                        State::MapKey(o)
-                    }
-                    None => {
-                        // Empty value, empty map.
-                        ret = Ok(State::MapKey(Default::default()));
-                        State::MapKey(o)
-                    }
-                    _ => {
-                        // Inline entry, cannot be map.
-                        ret = err!("Invalid map entry");
-                        Default::default()
-                    }
-                }
-            }
-            State::SpecialSecond(mut o) => {
-                o.try_unfold_only_child_outline();
-                ret = Ok(State::MapKey(o));
-                Default::default()
-            }
-
-            State::Words(_) | State::InlineStruct { .. } => s,
-        });
-
-        ret
-    }
-
-    fn enter_struct(
-        &mut self,
-        fields: &'static [&'static str],
-    ) -> Result<State<'a>> {
-        // XXX: This is *almost* the same as enter_map, very copy-pastey, but
-        // it has the difference that inline structs are a thing, but aren't
-        // allowed in pair head position.
-        let mut ret = err!("Invalid struct");
-
-        take_mut::take(self, |s| match s {
-            State::Document(f) if f.is_empty() => {
-                ret = Ok(State::MapKey(Default::default()));
-                Default::default()
-            }
-            State::Document(Fragment::Outline(mut o)) => {
-                o.try_unfold_only_child_outline();
-
-                ret = Ok(State::MapKey(o));
-                Default::default()
-            }
-            State::Document(Fragment::Item(i)) => {
-                let (mut words, _) = parse::words(i.head);
-                words.reverse();
-                let fields: Vec<&'static str> =
-                    fields.iter().rev().cloned().collect();
-                if words.len() == fields.len() {
-                    ret = Ok(State::InlineStruct { words, fields });
-                }
-                Default::default()
-            }
-
-            State::Sequence(mut o) => {
-                match o.pop_nonblank() {
-                    Some(Fragment::Outline(mut a)) => {
-                        a.try_unfold_only_child_outline();
-
-                        // Nested block, like a map.
-                        ret = Ok(State::MapKey(a));
-                        State::Sequence(o)
-                    }
-                    Some(Fragment::Item(i)) => {
-                        let (mut words, _) = parse::words(i.head);
-                        words.reverse();
-                        let fields: Vec<&'static str> =
-                            fields.iter().rev().cloned().collect();
-                        if words.len() == fields.len() {
-                            ret = Ok(State::InlineStruct { words, fields });
-                        }
-                        State::Sequence(o)
-                    }
-                    None => {
-                        // Not supporting completely empty structs in
-                        // sequences.
-                        Default::default()
-                    }
-                }
-            }
             State::SpecialFirst(Fragment::Outline(mut o)) => {
                 let prev_o = o.clone();
 
-                // Behave exactly like a map in pair head position, do not
-                // consider inline structs.
                 match o.pop_nonblank() {
                     Some(Fragment::Outline(a)) => {
                         // Nested block, that's a map.
-                        ret = Ok(State::MapKey(a));
+                        ret = Ok(State::VerticalSeq(a));
                         State::SpecialSecond(o)
                     }
                     Some(Fragment::Item(_)) => {
                         // Inline item, inject an empty map, don't consume the
                         // item.
-                        ret = Ok(State::MapKey(Default::default()));
+                        ret = Ok(State::VerticalSeq(Default::default()));
                         State::SpecialSecond(prev_o)
                     }
                     None => {
-                        // Empty struct
-                        ret = Ok(State::MapKey(Default::default()));
-                        State::SpecialSecond(o)
-                    }
-                }
-            }
-
-            State::MapKey(_) => {
-                // TODO: We definitely want to support inline structs for
-                // section-head map keys.
-                ret = err!("Not supported");
-                s
-            }
-            State::MapValue(mut o) => {
-                match o.pop() {
-                    Some(i) if !i.is_line() => {
-                        let mut val = i.body.clone();
-
-                        val.try_unfold_only_child_outline();
-
-                        // Vertical sequence from body of section (head was
-                        // key)
-                        ret = Ok(State::MapKey(val));
-                        State::MapKey(o)
-                    }
-                    Some(i) => {
-                        // Inline struct.
-                        let (mut words, _) = parse::words(i.head);
-                        words.reverse();
-                        let fields: Vec<&'static str> =
-                            fields.iter().rev().cloned().collect();
-                        if words.len() == fields.len() {
-                            ret = Ok(State::InlineStruct { words, fields });
-                        }
-                        State::MapKey(o)
-                    }
-                    None => {
-                        // Empty value, empty map.
-                        ret = Ok(State::MapKey(Default::default()));
-                        State::MapKey(o)
+                        // Nothing here, empty map.
+                        ret = Ok(State::VerticalSeq(Default::default()));
+                        State::SpecialSecond(prev_o)
                     }
                 }
             }
             State::SpecialSecond(mut o) => {
-                o.try_unfold_only_child_outline();
-                ret = Ok(State::MapKey(o));
+                config.try_unfold(&mut o);
+                ret = Ok(State::VerticalSeq(o));
                 Default::default()
             }
 
-            State::Words(_)
-            | State::InlineStruct { .. }
-            | State::SpecialFirst(Fragment::Item(_)) => s,
-        });
-
-        ret
-    }
-
-    fn enter_nonunit_enum(&mut self) -> Result<State<'a>> {
-        // Reuses map item machinery, but does not enter a structure.
-        let mut ret = err!("Invalid enum");
-
-        take_mut::take(self, |s| match s {
-            State::Document(f) if f.is_empty() => Default::default(),
-            State::Document(Fragment::Outline(o)) => {
-                ret = Ok(State::MapKey(o));
-                Default::default()
+            _ => {
+                ret = err!("enter_seq: Invalid type");
+                s
             }
-            State::Document(Fragment::Item(i)) => {
-                // Synthesize a single-line outline, calling next() with the
-                // MapKey should split off the front word.
-                ret = Ok(State::MapKey(Outline(vec![i])));
-
-                Default::default()
-            }
-            State::Sequence(mut o) => {
-                match o.pop_nonblank() {
-                    // Only line or section items are valid, use same logic as
-                    // parsing maps.
-                    Some(Fragment::Item(i)) => {
-                        ret = Ok(State::MapKey(Outline(vec![i])));
-                        State::Sequence(o)
-                    }
-                    _ => Default::default(),
-                }
-            }
-            State::MapKey(_) => todo!(),
-            State::MapValue(_) => todo!(),
-            State::SpecialFirst(_) => todo!(),
-            State::SpecialSecond(_) => todo!(),
-            State::Words(_) | State::InlineStruct { .. } => s,
         });
 
         ret
@@ -782,23 +617,20 @@ impl<'a> State<'a> {
                 ret = Ok(State::SpecialFirst(content));
                 State::Document(Default::default())
             }
-            State::Sequence(mut o) => {
+            State::VerticalSeq(mut o) => {
                 // Sequence -> pair, prepare for raw mode, no blank filtering.
                 if let Some(i) = o.pop() {
                     ret = Ok(State::SpecialFirst(i.into()));
                 }
-                State::Sequence(o)
+                State::VerticalSeq(o)
             }
-            State::MapValue(mut o) => {
-                // Must be an outline-style value.
-                match o.pop() {
-                    Some(i) if !i.is_line() => {
-                        // Vertical sequence from body of section (head was
-                        // key)
-                        ret = Ok(State::SpecialFirst(i.body.into()));
-                        State::MapKey(o)
-                    }
-                    _ => Default::default(),
+            State::SectionSeq { i, item, n } if item.is_block() => {
+                // Map values etc.
+                ret = Ok(State::SpecialFirst(item.body.into()));
+                State::SectionSeq {
+                    i: i + 1,
+                    n,
+                    item: Default::default(),
                 }
             }
             State::SpecialSecond(o) => {
@@ -806,10 +638,7 @@ impl<'a> State<'a> {
                 State::Document(Default::default())
             }
             // Others are no-go.
-            State::Words(_)
-            | State::InlineStruct { .. }
-            | State::MapKey(_)
-            | State::SpecialFirst(_) => s,
+            _ => s,
         });
 
         ret
@@ -818,13 +647,9 @@ impl<'a> State<'a> {
     fn is_empty(&self) -> bool {
         match self {
             State::Document(f) => f.is_empty(),
-            State::Sequence(o) => o.is_empty_or_blank(),
-            State::Words(w) => w.is_blank(),
+            State::VerticalSeq(o) => o.is_empty_or_blank(),
+            State::SectionSeq { item, .. } => item.is_blank(),
             State::InlineStruct { words, .. } => words.is_empty(),
-            State::MapKey(o) => o.is_empty_or_blank(),
-            // Only accessible after MapKey, must have a value if MapKey
-            // passed
-            State::MapValue(_) => false,
             // Special halves are considered nonempty if pair was entered
             // succesfully.
             State::SpecialFirst(_) => false,
@@ -835,13 +660,9 @@ impl<'a> State<'a> {
     fn is_really_empty(&self) -> bool {
         match self {
             State::Document(f) => f.is_empty(),
-            State::Sequence(o) => o.is_empty(),
-            State::Words(w) => w.is_blank(),
+            State::VerticalSeq(o) => o.is_empty(),
+            State::SectionSeq { item, .. } => item.is_blank(),
             State::InlineStruct { words, .. } => words.is_empty(),
-            State::MapKey(o) => o.is_empty(),
-            // Only accessible after MapKey, must have a value if MapKey
-            // passed
-            State::MapValue(_) => false,
             // Special halves are considered nonempty if pair was entered
             // succesfully.
             State::SpecialFirst(_) => false,
@@ -857,11 +678,11 @@ impl fmt::Display for State<'_> {
                 write!(f, "Document(\n{o})")
             }
             State::Document(Fragment::Item(i)) => write!(f, "Document({i})"),
-            State::Sequence(o) => write!(f, "Sequence(\n{o})"),
-            State::Words(words) => {
-                write!(f, "Words({words})")
+            State::VerticalSeq(o) => write!(f, "VerticalSeq(\n{o})"),
+            State::SectionSeq { item, .. } => {
+                write!(f, "SectionSeq({item})")
             }
-            State::InlineStruct { words, fields } => {
+            State::InlineStruct { words, fields, .. } => {
                 writeln!(f, "InlineStruct(")?;
                 write!(f, " ")?;
                 for a in fields.iter().rev() {
@@ -873,8 +694,6 @@ impl fmt::Display for State<'_> {
                 }
                 write!(f, ")")
             }
-            State::MapKey(o) => write!(f, "MapKey(\n{o})"),
-            State::MapValue(o) => write!(f, "MapValue(\n{o})"),
             State::SpecialFirst(Fragment::Outline(o)) => {
                 write!(f, "SpecialFirst(\n{o})")
             }
@@ -914,7 +733,7 @@ mod tests {
         }
 
         fn pair(&mut self, p: impl FnOnce(&mut Self)) {
-            self.enter_pair().unwrap();
+            self.enter_tuple(2).unwrap();
             self.enter_special().unwrap();
             p(self);
             self.exit().unwrap();
@@ -1075,10 +894,14 @@ Title 2
                 assert_eq!(p.n(), "Title");
                 p.pair(|p| {
                     p.map(|p| {
-                        assert_eq!(p.n(), "a");
-                        assert_eq!(p.n(), "1");
-                        assert_eq!(p.n(), "b");
-                        assert_eq!(p.n(), "2");
+                        p.seq(|p| {
+                            assert_eq!(p.n(), "a");
+                            assert_eq!(p.n(), "1");
+                        });
+                        p.seq(|p| {
+                            assert_eq!(p.n(), "b");
+                            assert_eq!(p.n(), "2");
+                        });
                     });
                     p.seq(|p| {
                         assert_eq!(p.n(), "Content");
