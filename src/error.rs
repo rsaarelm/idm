@@ -103,6 +103,18 @@ impl<'a> From<&'a str> for Error {
     }
 }
 
+impl From<std::io::Error> for Error {
+    fn from(e: std::io::Error) -> Self {
+        Error::new(e.to_string())
+    }
+}
+
+impl From<std::string::FromUtf8Error> for Error {
+    fn from(e: std::string::FromUtf8Error) -> Self {
+        Error::new(e.to_string())
+    }
+}
+
 #[macro_export(local_inner_macros)]
 macro_rules! err {
     () => {
