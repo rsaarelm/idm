@@ -1,6 +1,5 @@
 use std::io::Read;
 
-use idm;
 use lazy_static::lazy_static;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -9,7 +8,7 @@ use serde::{Deserialize, Serialize};
 // One-off tool, probably won't be maintained.
 
 #[derive(PartialEq, Default, Debug, Serialize, Deserialize)]
-struct Outline(Vec<(String, Outline)>);
+struct Outline(Vec<((String,), Outline)>);
 
 impl Outline {
     fn migrate(&mut self) {
@@ -19,9 +18,9 @@ impl Outline {
         }
 
         let mut in_header = true;
-        for (head, body) in self.0.iter_mut() {
-            if RE.is_match(&head) && in_header {
-                *head = RE.replace(&head, ":$a$b").to_string();
+        for ((head,), body) in self.0.iter_mut() {
+            if RE.is_match(head) && in_header {
+                *head = RE.replace(head, ":$a$b").to_string();
             } else {
                 in_header = false;
             }

@@ -36,15 +36,14 @@ impl std::ops::Deref for Outline {
 ///
 /// The attributes are used to tag the headline as a HTML element
 #[derive(Debug, Serialize, Deserialize)]
-struct Item(String, (IndexMap<String, String>, Outline));
+struct Item((String,), ((IndexMap<String, String>,), Outline));
 
 impl fmt::Display for Outline {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "<p>")?;
 
-        for i in &self.0 {
-            let attrs = &i.1 .0;
-            if i.0.is_empty() {
+        for Item((line,), ((attrs,), rest)) in &self.0 {
+            if line.is_empty() {
                 // Blank line, make a paragraph break.
                 // Blank lines should parse so that they never have child
                 // lines in the outline.
@@ -54,7 +53,7 @@ impl fmt::Display for Outline {
 
             // Hyperlinks
             if attrs.contains_key("href") {
-                writeln!(f, "<a href='{}'>{}</a>", attrs["href"], i.0)?;
+                writeln!(f, "<a href='{}'>{line}</a>", attrs["href"])?;
                 continue;
             }
 
@@ -62,17 +61,17 @@ impl fmt::Display for Outline {
             if attrs.contains_key("img") {
                 writeln!(
                     f,
-                    "<p><img src='{}' alt='{}'/></p>",
-                    attrs["img"], i.0
+                    "<p><img src='{}' alt='{line}'/></p>",
+                    attrs["img"]
                 )?;
                 continue;
             }
 
             // Regular text.
-            writeln!(f, "{}", i.0)?;
+            writeln!(f, "{line}")?;
             // If there's nested contents, print those too.
-            if !i.1 .1.is_empty() {
-                writeln!(f, "{}", i.1 .1)?;
+            if !rest.is_empty() {
+                writeln!(f, "{rest}")?;
             }
         }
 
@@ -98,9 +97,9 @@ pub fn main() {
         std::fs::read_to_string(p).expect("Failed to load blog at given path")
     });
 
-    let mut blog = idm::from_str::<(
-        BlogData,
-        IndexMap<String, (Entry, Outline)>,
+    let ((metadata,), mut blogposts) = idm::from_str::<(
+        (BlogData,),
+        IndexMap<String, ((Entry,), Outline)>,
     )>(if blog_file.is_some() {
         blog_file.as_ref().unwrap()
     } else {
@@ -110,7 +109,7 @@ pub fn main() {
     .expect("Failed to parse blog");
 
     // Generate missing slugs.
-    for (title, (entry, _)) in blog.1.iter_mut() {
+    for (title, ((entry,), _)) in blogposts.iter_mut() {
         if entry.slug.is_empty() {
             entry.slug = slug::slugify(title);
         }
@@ -129,9 +128,9 @@ pub fn main() {
                 // XXX: Might want to cache this...
                 let mut buf = String::new();
 
-                write!(&mut buf, "<h1>{}</h1>", blog.0.title).unwrap();
+                write!(&mut buf, "<h1>{}</h1>", metadata.title).unwrap();
 
-                for (title, (entry, _)) in &blog.1 {
+                for (title, ((entry,), _)) in &blogposts {
                     write!(&mut buf, "<p><a href='/{}'>{}</a> | {}</p>",
                         entry.slug, title, entry.published).unwrap();
                 }
@@ -139,15 +138,15 @@ pub fn main() {
             },
 
             (GET) (/{id: String}) => {
-                if let Some((title, (entry, outline))) = blog.1.iter().find(|(_, (entry, _))| entry.slug == id) {
+                if let Some((title, ((entry,), outline))) = blogposts.iter().find(|(_, ((entry,), _))| entry.slug == id) {
                     let mut buf = String::new();
-                    writeln!(&mut buf, "<p><a href='/'>{}</a></p>", blog.0.title).unwrap();
+                    writeln!(&mut buf, "<p><a href='/'>{}</a></p>", metadata.title).unwrap();
                     writeln!(&mut buf, "<h1>{}</h1>", title).unwrap();
                     write!(&mut buf, "<em>Tags: ").unwrap();
                     for t in &entry.tags {
                         write!(&mut buf, "<a href='/Tagged/{}'>{}</a> ", t, t).unwrap();
                     }
-                    writeln!(&mut buf, " | {} | Written by {}</em>", entry.published, blog.0.author).unwrap();
+                    writeln!(&mut buf, " | {} | Written by {}</em>", entry.published, metadata.author).unwrap();
 
                     writeln!(&mut buf, "{}", outline).unwrap();
 
@@ -172,7 +171,7 @@ mod date_format {
     use chrono::NaiveDate;
     use serde::{self, Deserialize, Deserializer, Serializer};
 
-    const FORMAT: &'static str = "%Y-%m-%d";
+    const FORMAT: &str = "%Y-%m-%d";
 
     pub fn serialize<S>(
         date: &NaiveDate,
