@@ -2,7 +2,7 @@ use std::{collections::BTreeMap, fmt, iter::FromIterator};
 
 use crate::{
     from_str, outline, outline::Outline, to_string, to_string_styled,
-    to_string_styled_like, Style,
+    to_string_styled_like, Indentation,
 };
 use indexmap::IndexMap;
 use lazy_static::lazy_static;
@@ -1253,7 +1253,7 @@ fn string_literal_indent_rewrite() {
     );
 
     let tabified_output =
-        to_string_styled(Style::Tabs, &spaces_outline).unwrap();
+        to_string_styled(Indentation::Tabs, &spaces_outline).unwrap();
     // And we should be back where we started.
     assert_eq!(
         tabified_output,

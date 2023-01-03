@@ -1,12 +1,13 @@
+use std::io::{self, Write};
+
+use serde::{ser, Serialize};
+
 use crate::{
-    err, from_str, guess_indent_style, infer_indent_style, parse::CharExt,
+    ast::{Ast, Expr},
+    err,
+    parse::CharExt,
     Error, Result,
 };
-use serde::{
-    ser::{self, SerializeMap},
-    Serialize,
-};
-use std::fmt;
 
 /// Serialize a value using the default indentation style.
 pub fn to_string<T: ser::Serialize>(value: &T) -> Result<String> {
@@ -15,12 +16,12 @@ pub fn to_string<T: ser::Serialize>(value: &T) -> Result<String> {
 
 /// Serialize a value using the given indentation style.
 pub fn to_string_styled<T: ser::Serialize>(
-    style: Style,
+    style: Indentation,
     value: &T,
 ) -> Result<String> {
-    let mut serializer = Serializer { style };
-    let expr = value.serialize(&mut serializer)?;
-    Ok(Formatted(style, expr).to_string())
+    let mut buf = Vec::new();
+    value.serialize(&mut Serializer::new(&mut buf).with_indentation(style))?;
+    Ok(String::from_utf8(buf)?)
 }
 
 /// Serialize a value using indentation style inferred from an existing
@@ -29,995 +30,676 @@ pub fn to_string_styled_like<T: ser::Serialize>(
     sample: &str,
     value: &T,
 ) -> Result<String> {
-    to_string_styled(guess_indent_style(sample), value)
+    to_string_styled(Indentation::infer(sample).unwrap_or_default(), value)
 }
 
-/// Descriptor for elements that correspond to an atomic value.
-#[derive(Eq, PartialEq, Clone, Debug)]
-enum Value {
-    /// Value with no whitespace.
-    ///
-    /// Guaranteed to be nonempty.
-    Word(String),
-    /// Value that contains spaces but no newlines.
-    ///
-    /// Guaranteed to be nonempty and to contain at least one space.
-    /// Is usually a String.
-    Line(String),
-    /// Value that contains newlines.
-    ///
-    /// Guaranteed to be nonempty and to contain at least one newline.
-    /// Is usually a String.
-    Paragraph(String),
+pub struct Serializer<W: Write> {
+    indent: Indentation,
+    w: W,
 }
 
-use Value::*;
-
-impl fmt::Display for Value {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Word(s) | Line(s) | Paragraph(s) => write!(f, "{}", s),
+impl<W: Write> Serializer<W> {
+    pub fn new(writer: W) -> Serializer<W> {
+        Serializer {
+            indent: Default::default(),
+            w: writer,
         }
     }
-}
 
-impl Value {
-    pub fn new(style: Style, text: impl AsRef<str>) -> Result<Value> {
-        let text = text
-            .as_ref()
-            .trim_end_matches(CharExt::is_idm_whitespace)
-            .to_string();
+    pub fn with_indentation(mut self, indent: Indentation) -> Serializer<W> {
+        self.indent = indent;
+        self
+    }
 
-        if text.is_empty() {
-            return err!("Empty string for value");
-        }
-
-        let mut newline = false;
-        let mut space = false;
-        for c in text.chars() {
-            if c.is_idm_whitespace() {
-                space = true;
+    /// Toplevel write method, decide if the full expression is inline or
+    /// outline.
+    ///
+    /// The trailing newline is significant, if a fragment can be fully
+    /// inlined, it should be printed without a trailing newline.
+    fn write(&mut self, expr: &Expr) -> Result<()> {
+        match expr {
+            // Don't do comment escape if it's just a single atom.
+            Expr::Word(_) | Expr::Number(_) | Expr::Line(_) => {
+                self.write_inline(expr)
             }
-            if c == '\n' {
-                newline = true;
-                // We can't learn anything more, might as well call it quits.
-                break;
+            // Do switch to outline with sequences if the first item looks
+            // commenty.
+            Expr::Seq(_) | Expr::Tuple(_)
+                if expr.is_line() && !expr.looks_like_comment() =>
+            {
+                self.write_inline(expr)
             }
-        }
-
-        if newline {
-            Ok(Value::Paragraph(reformat_string(style, text)?))
-        } else if space {
-            Ok(Value::Line(text))
-        } else {
-            Ok(Value::Word(text))
+            Expr::EnumVariant(_, a) if a.is_line() => self.write_inline(expr),
+            _ => self.write_outline(0, false, expr),
         }
     }
 
-    fn from(style: Style, item: impl fmt::Display) -> Result<Value> {
-        Value::new(style, item.to_string())
-    }
-
-    pub fn empty_line() -> Value {
-        Value::Paragraph("\n".into())
-    }
-
-    fn as_str(&self) -> &str {
-        match self {
-            Word(s) => s,
-            Line(s) => s,
-            Paragraph(s) => s,
-        }
-    }
-
-    fn is_line_or_section(&self) -> bool {
-        if let Paragraph(s) = self {
-            // Non-empty line must start with non-whitespace.
-            assert!(s
-                .lines()
-                .next()
-                .unwrap()
-                .chars()
-                .next()
-                .map_or(true, |c| !c.is_idm_whitespace()));
-
-            // TODO: String literal formatter in construction that actually
-            // validates this stuff and errors out early if you try to feed
-            // invalid strings.
-            for line in s.lines().skip(1) {
-                if !line.chars().next().map_or(true, |c| c.is_idm_whitespace())
-                {
-                    // A line after the first one was not indented so this
-                    // value can not pass as a section.
-                    return false;
-                }
+    /// Write an inline expression, no indentation, no newline at end.
+    fn write_inline(&mut self, expr: &Expr) -> Result<()> {
+        match expr {
+            Expr::Word(a) | Expr::Number(a) | Expr::Line(a) => {
+                write!(&mut self.w, "{a}")?;
+                Ok(())
             }
-
-            true
-        } else {
-            true
-        }
-    }
-
-    fn is_blank_line(&self) -> bool {
-        matches!(self, Paragraph(s) if s.trim_matches(CharExt::is_idm_whitespace) == "")
-    }
-}
-
-// XXX Shouldn't Expr::MapElement and Expr::Pair be (Expr, Expr) instead of Vec<Expr>?
-
-/// Descriptor for an expression for a possibly structural value.
-#[derive(Eq, PartialEq, Clone, Debug)]
-enum Expr {
-    /// Empty expression.
-    ///
-    /// Can be used to mark items in structural values that will be omitted
-    /// from the whole, like `None` values for struct fields which will lead
-    /// to the whole field omitted from the serialized struct.
-    None,
-    /// Non-structural value.
-    Atom(Value),
-    /// Expression sequence for a variable element count sequence.
-    Seq(Vec<Expr>),
-    /// Key-value pairs in maps. Formatted section-like when vertical.
-    MapElement(Vec<Expr>),
-    /// Expressions with special formatting.
-    Pair(Vec<Expr>),
-}
-
-use Expr::{Atom, MapElement, Pair, Seq};
-
-#[derive(PartialEq, Debug)]
-enum Special {
-    None,
-    /// Adorn with colons.
-    Adorn,
-    /// Element after adorn, print without comment and indent.
-    Flatten,
-}
-
-impl Default for Expr {
-    fn default() -> Self {
-        Expr::None
-    }
-}
-
-impl Expr {
-    fn from(style: Style, item: impl fmt::Display) -> Result<Expr> {
-        let s = format!("{}", item);
-        if s.trim_end_matches(CharExt::is_idm_whitespace).is_empty() {
-            Ok(Expr::None)
-        } else {
-            Ok(Atom(Value::from(style, item)?))
-        }
-    }
-
-    /// Try to append a subexpression to an expression in a natural way.
-    ///
-    /// Atomic expressions need to be `sectionize`d before they can be pushed
-    /// to.
-    fn push(&mut self, e: Expr) {
-        match self {
-            Seq(es) | MapElement(es) | Pair(es) => es.push(e),
-            _ => panic!("Can't append to this expr type"),
-        }
-    }
-
-    fn is_inline_token(&self) -> bool {
-        matches!(self, Atom(Word(_)))
-    }
-
-    fn is_sequence(&self) -> bool {
-        matches!(self, Seq(_) | MapElement(_) | Pair(_))
-    }
-
-    /// Expression looks like a comment line and needs to be escaped in a
-    /// sequence.
-    fn looks_like_comment(&self) -> bool {
-        match self {
-            Atom(v) => v.as_str().starts_with("-- ") || v.as_str() == "--",
-            MapElement(es) | Seq(es) => {
-                es.first().map_or(false, |x| x.looks_like_comment())
-            }
-            _ => false,
-        }
-    }
-
-    /// Like `can_be_inlined`, but comment-looking things are fine.
-    fn can_be_tail_lined(&self) -> bool {
-        match self {
-            Expr::None => false,
-            Atom(Paragraph(_)) => false,
-            Atom(_) => true,
-            // Seqs are simple, everything must be homogeneous
-            Seq(es) => es.iter().all(|e| e.is_inline_token()),
-            // Tuples are more complex, last item just needs to be inlinable.
-            MapElement(es) => {
+            Expr::Seq(es) | Expr::Tuple(es) if expr.is_line() => {
                 for (i, e) in es.iter().enumerate() {
-                    if i == es.len() - 1 {
-                        // Last item of a tuple, can be an line item instead
-                        // of a word item.
-                        if !e.can_be_tail_lined() {
-                            return false;
-                        }
-                    } else if !e.is_inline_token() {
-                        return false;
+                    self.write_inline(e)?;
+                    if i + 1 < es.len() {
+                        write!(&mut self.w, " ")?;
                     }
                 }
-                true
+                Ok(())
             }
-            Pair(_) => false,
+            Expr::EnumVariant(e, a) if a.is_line() => {
+                write!(&mut self.w, "{e} ")?;
+                self.write_inline(a)
+            }
+            _ => err!("Serializer::write_inline: Invalid expr"),
         }
     }
 
-    /// Expression can be printed in inline form.
+    /// Write an outline expression, indent and end in newline.
+    fn write_outline(
+        &mut self,
+        depth: usize,
+        adorn: bool,
+        expr: &Expr,
+    ) -> Result<()> {
+        match expr {
+            Expr::None => Ok(()),
+            Expr::Word(a) | Expr::Number(a) | Expr::Line(a) => {
+                self.indent.write(&mut self.w, depth)?;
+                writeln!(&mut self.w, "{a}")?;
+                Ok(())
+            }
+            Expr::Paragraph(a) => {
+                let a = self.reformat_string(a.to_string())?;
+                for line in a.lines() {
+                    self.indent.write(&mut self.w, depth)?;
+                    writeln!(&mut self.w, "{line}")?;
+                }
+                Ok(())
+            }
+            Expr::Seq(_) | Expr::Tuple(_)
+                if expr.is_line() && !expr.looks_like_comment() =>
+            {
+                self.indent.write(&mut self.w, depth)?;
+                self.write_inline(expr)?;
+                writeln!(&mut self.w)?;
+                Ok(())
+            }
+            Expr::Seq(es) | Expr::Tuple(es) => {
+                for e in es {
+                    let commenty = e.looks_like_comment();
+                    if e.is_line() {
+                        if commenty {
+                            self.indent.write(&mut self.w, depth)?;
+                            writeln!(&mut self.w, "--")?;
+                            self.write_outline(depth + 1, false, e)?;
+                        } else {
+                            self.write_outline(depth, false, e)?;
+                        }
+                    } else if e.is_section() && !commenty {
+                        self.write_outline(depth, false, e)?;
+                    } else {
+                        // Sequencing blocks, add extra indentation and a
+                        // comment as a separator.
+                        self.indent.write(&mut self.w, depth)?;
+                        writeln!(&mut self.w, "--")?;
+                        self.write_outline(depth + 1, false, e)?;
+                    }
+                }
+                Ok(())
+            }
+            Expr::Map(es) => {
+                for (k, v) in es {
+                    self.indent.write(&mut self.w, depth)?;
+                    if adorn {
+                        write!(&mut self.w, ":")?;
+                    }
+                    self.write_inline(k)?;
+                    if k.is_word() && v.is_line() {
+                        write!(&mut self.w, " ")?;
+                        self.write_inline(v)?;
+                        writeln!(&mut self.w)?;
+                    } else {
+                        writeln!(&mut self.w)?;
+                        self.write_outline(depth + 1, false, v)?;
+                    }
+                }
+                Ok(())
+            }
+            // TODO: Emit inline structs if configured to do so
+            Expr::Struct(es) => {
+                for (k, v) in es {
+                    self.indent.write(&mut self.w, depth)?;
+                    if adorn {
+                        write!(&mut self.w, ":")?;
+                    }
+                    write!(&mut self.w, "{k}")?;
+                    if v.is_line() {
+                        write!(&mut self.w, " ")?;
+                        self.write_inline(v)?;
+                        writeln!(&mut self.w)?;
+                    } else {
+                        writeln!(&mut self.w)?;
+                        self.write_outline(depth + 1, false, v)?;
+                    }
+                }
+                Ok(())
+            }
+            Expr::EnumVariant(e, a) => {
+                self.indent.write(&mut self.w, depth)?;
+                write!(&mut self.w, "{e}")?;
+                if a.is_line() {
+                    write!(&mut self.w, " ")?;
+                    self.write_inline(a)?;
+                    writeln!(&mut self.w)?;
+                } else {
+                    writeln!(&mut self.w)?;
+                    self.write_outline(depth + 1, false, a)?;
+                }
+                Ok(())
+            }
+            Expr::SpecialPair(head, body) => {
+                if head.is_mappish() {
+                    self.write_outline(depth, true, head)?;
+                    self.write_outline(depth, false, body)?
+                } else if head.is_empty() || head.is_line() {
+                    if head.is_empty() {
+                        writeln!(&mut self.w)?;
+                    } else {
+                        self.indent.write(&mut self.w, depth)?;
+                        self.write_inline(head)?;
+                        writeln!(&mut self.w)?;
+                    }
+                    self.write_outline(depth + 1, false, body)?;
+                } else {
+                    return err!("Serializer::write: Bad special pair");
+                }
+                Ok(())
+            }
+        }
+    }
+
+    /// Reformat a multiline string value if necessary so that it will be a valid
+    /// IDM fragment in the indentation style of the output.
     ///
-    /// (Does not check for maximum length, just the logical inlinability.)
-    fn can_be_inlined(&self) -> bool {
-        !self.looks_like_comment() && self.can_be_tail_lined()
-    }
-
-    /// Expr is either a line or a section with that touches the left margin
-    /// with only a single point at the start of the expr.
-    fn is_line_or_section(&self) -> bool {
-        // NB. This *does not apply* for seqs that have a single element but
-        // are not inlineable, even though they look line-like when printed
-        // out. The parser seeing a single line when it expects a sequence
-        // cannot tell it's looking at a single line element instead of
-        // multiple inlined word elements.
-        match self {
-            x if x.looks_like_comment() => false,
-            // Pairs are formatted as sections if the head can be inlined.
-            MapElement(es) => {
-                es.len() == 2
-                    && es.iter().next().map_or(false, |e| e.can_be_inlined())
+    /// Returns an error if the string is not a valid IDM fragment to begin with.
+    fn reformat_string(&self, input: String) -> Result<String> {
+        // Leading whitespace can't be handled, fail fast.
+        if let Some(c) = input.chars().next() {
+            if c.is_idm_whitespace() {
+                return err!("Leading whitespace in string value");
             }
-            // Use can_be_tail_lined for pairs, it doesn't check for
-            // comment-likeness. Pair line heads are parsed in raw mode so
-            // they can look like comments.
-            Pair(es) => es
-                .iter()
-                .next()
-                .map_or(false, |e| e.can_be_tail_lined() || e.is_blank_line()),
-
-            // String literals can also be section like if they're literally
-            // section-shaped, ie. every line after first is indented.
-            Atom(v) => v.is_line_or_section(),
-            // Out of the complex expr types, only tuples can be section-like.
-            _ => false,
         }
-    }
 
-    fn is_empty(&self) -> bool {
-        matches!(self, Expr::None)
-            || matches!(self, MapElement(es) | Seq(es) | Pair(es) if es.iter().all(|e| e.is_empty()))
-    }
-
-    fn is_blank_line(&self) -> bool {
-        matches!(self, Atom(Paragraph(x)) if x == "\n")
-    }
-}
-
-struct Formatted(Style, Expr);
-
-impl fmt::Display for Formatted {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let Formatted(ref style, ref expr) = self;
-        if expr.can_be_inlined() {
-            style.expr_inline(f, expr)
+        let input_style = if let Some(input_style) = Indentation::infer(&input)
+        {
+            input_style
         } else {
-            style.expr_outline(f, 0, false, expr)
+            // If the indent can't be inferred, no input lines are indented,
+            // string can be used as is.
+            return Ok(input);
+        };
+
+        // The input has some indentation, so it might not be valid IDM. Let's
+        // check that right now. If it deserializes into Outline, it should be
+        // good.
+        let outline: crate::outline::Outline = crate::de::from_str(&input)?;
+
+        if input_style.is_compatible_with(&self.indent) {
+            // It's valid input and already uses the indentation type we want,
+            // return as is and forget about our outline value.
+            Ok(input)
+        } else {
+            // Otherwise fix the indentation by reserializing the outline.
+
+            // NB. A simple outline type should only have single-line line values
+            // that will return None form infer_indent_style, so this does not
+            // lead into infinite recursion as these are again passed through
+            // reformat_string when serializing.
+            let reser = to_string_styled(self.indent, &outline)?;
+            Ok(reser)
         }
     }
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
-pub enum Style {
+pub enum Indentation {
     Tabs,
     Spaces(usize),
 }
 
-impl Default for Style {
+impl Default for Indentation {
     fn default() -> Self {
-        Style::Spaces(2)
+        Indentation::Spaces(2)
     }
 }
 
-impl fmt::Display for Style {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match *self {
-            Style::Tabs => write!(f, "\t"),
-            Style::Spaces(n) => {
-                debug_assert!(n > 0);
-                for _ in 0..n {
-                    write!(f, " ")?;
-                }
-                Ok(())
-            }
-        }
-    }
-}
-
-impl Style {
-    fn indent(&self, fmt: &'_ mut fmt::Formatter<'_>, n: i32) -> fmt::Result {
-        for _ in 0..n {
-            write!(fmt, "{}", self)?;
-        }
-        Ok(())
-    }
-
-    fn value_inline(
-        &self,
-        f: &mut fmt::Formatter<'_>,
-        v: &Value,
-    ) -> fmt::Result {
-        match v {
-            Word(s) => write!(f, "{}", s),
-            Line(s) => write!(f, "{}", s),
-            v if v.is_blank_line() => Ok(()),
-            Paragraph(_) => panic!("value_inline: Paragraphs can't be inlined"),
-        }
-    }
-
-    /// Print value as part of outline at given depth.
-    fn value_outline(
-        &self,
-        f: &mut fmt::Formatter<'_>,
-        depth: i32,
-        v: &Value,
-    ) -> fmt::Result {
-        match v {
-            Word(s) => {
-                self.indent(f, depth)?;
-                writeln!(f, "{}", s)
-            }
-            Line(s) => {
-                self.indent(f, depth)?;
-                writeln!(f, "{}", s)
-            }
-            Paragraph(s) => {
-                for line in s.lines() {
-                    if line.trim_matches(CharExt::is_idm_whitespace).is_empty()
-                    {
-                        // Don't indent empty lines.
-                        writeln!(f)?;
-                    } else {
-                        self.indent(f, depth)?;
-                        writeln!(f, "{}", line)?;
-                    }
-                }
-                Ok(())
-            }
-        }
-    }
-
-    /// Print an expression in inline form right where the cursor is now.
-    fn expr_inline(
-        &self,
-        f: &mut fmt::Formatter<'_>,
-        expr: &Expr,
-    ) -> fmt::Result {
-        match expr {
-            Atom(v) => self.value_inline(f, v),
-            Seq(es) | MapElement(es) if expr.can_be_inlined() => {
-                for (i, e) in es.iter().enumerate() {
-                    if i != 0 {
-                        write!(f, " ")?;
-                    }
-                    self.expr_inline(f, e)?;
-                }
-                Ok(())
-            }
-            _ => panic!("expr_inline: Can't inline expression {:?}", expr),
-        }
-    }
-
-    /// Print an expression in outline form indented to the given depth.
-    fn expr_outline(
-        &self,
-        f: &mut fmt::Formatter<'_>,
-        depth: i32,
-        is_adorned: bool,
-        expr: &Expr,
-    ) -> fmt::Result {
-        match expr {
-            Expr::None => Ok(()),
-            e if e.is_blank_line() => writeln!(f),
-            Atom(v) => self.value_outline(f, depth, v),
-            Pair(_) if expr.is_empty() => Ok(()),
-            Seq(es) | MapElement(es) | Pair(es) => {
-                let empty_pair_head = matches!(expr, Pair(_))
-                    && es.iter().next().map_or(false, |e| e.is_empty());
-                if expr.is_line_or_section() && !empty_pair_head {
-                    match es.as_slice() {
-                        [head, body] => {
-                            if !head.is_blank_line() {
-                                self.indent(f, depth)?;
-                                if is_adorned {
-                                    write!(f, ":")?;
-                                }
-                                self.expr_inline(f, head)?;
-                            }
-                            writeln!(f)?;
-
-                            self.expr_outline(f, depth + 1, false, body)?;
-
-                            Ok(())
-                        }
-                        _ => {
-                            panic!("expr_outline: Section tuple is not a pair")
-                        }
-                    }
+impl Indentation {
+    pub fn infer(input: &str) -> Option<Self> {
+        let mut at_line_start = true;
+        let mut prefix = String::new();
+        for c in input.chars() {
+            if c == '\n' {
+                at_line_start = true;
+                continue;
+            } else if !c.is_idm_whitespace() {
+                if !prefix.is_empty() {
+                    // Got what we wanted.
+                    break;
                 } else {
-                    let mut was_adorned = false;
-                    for (i, e) in es.iter().enumerate() {
-                        let special;
-
-                        if is_adorned {
-                            // Sticky adornment.
-                            special = Special::Adorn;
-                        } else if matches!(expr, MapElement(_) | Pair(_))
-                            && e.is_sequence()
-                            && es.len() == 2
-                            && i == 0
-                        {
-                            was_adorned = true;
-                            special = Special::Adorn;
-                            if e.is_empty() {
-                                // Avoid emitting an extra blank line.
-                                continue;
-                            }
-                        } else if i == 1 && was_adorned {
-                            special = Special::Flatten;
-                        } else {
-                            special = Special::None;
-                        }
-
-                        self.sequence_expr(f, depth, special, e)?;
-                    }
-                    Ok(())
+                    at_line_start = false;
                 }
             }
-        }
-    }
 
-    /// Print an expression at given depth, ensuring that it shows up as a
-    /// valid sequence element with a single margin point.
-    ///
-    /// Block-like elements that don't have an unique margin point at the
-    /// start will get a synthetic `--` added to the top and the rest of the
-    /// value indented. Exprs that start with `--` and would be mistaken as
-    /// comments are escaped in similar manner, by adding the extra `--` above
-    /// them.
-    ///
-    /// Section or line shaped expressions that don't look like comments will
-    /// be printed as is. Expressions will be printed in inline form if
-    /// possible.
-    fn sequence_expr(
-        &self,
-        f: &mut fmt::Formatter<'_>,
-        depth: i32,
-        special: Special,
-        expr: &Expr,
-    ) -> fmt::Result {
-        if expr.is_blank_line() {
-            writeln!(f)?;
-            return Ok(());
-        }
-
-        if expr.can_be_inlined() {
-            // Doesn't look like a comment, doesn't have non-inlineable
-            // sequence nesting.
-            self.indent(f, depth)?;
-            if special == Special::Adorn {
-                write!(f, ":")?;
+            if at_line_start && c.is_idm_whitespace() {
+                prefix.push(c);
             }
-            self.expr_inline(f, expr)?;
-            writeln!(f)?;
-            return Ok(());
         }
 
-        if expr.is_line_or_section() {
-            // Section-looking things can be printed without escaping the
-            // depth. Again, the predicate isn't true if the expr looks like a
-            // comment.
-            self.expr_outline(f, depth, special == Special::Adorn, expr)?;
-            return Ok(());
-        }
-
-        if matches!(expr, Expr::None) {
-            return Ok(());
-        }
-
-        // If we fell through here, it's not an inlineable expr nor a section.
-        // Either it looks like a comment and needs to be escaped, or it's a
-        // multi-line block. Treatment is the same in both cases, insert a
-        // separator comment line and print the expr normally under it.
-
-        if special == Special::Adorn {
-            self.expr_outline(f, depth, true, expr)?;
-        } else if special == Special::Flatten {
-            self.expr_outline(f, depth, false, expr)?;
+        if let Some(c) = prefix.chars().next() {
+            if c == '\t' {
+                Some(Indentation::Tabs)
+            } else if c == ' ' {
+                Some(Indentation::Spaces(prefix.len()))
+            } else {
+                None
+            }
         } else {
-            self.indent(f, depth)?;
-            writeln!(f, "--")?;
-            self.expr_outline(f, depth + 1, false, expr)?;
+            None
         }
-        Ok(())
     }
 
-    fn compatible_with(&self, other: &Style) -> bool {
-        use Style::*;
+    fn is_compatible_with(&self, other: &Indentation) -> bool {
+        use Indentation::*;
         matches!((self, other), (Tabs, Tabs) | (Spaces(_), Spaces(_)))
     }
 }
 
-struct Serializer {
-    style: Style,
-}
-
-impl Serializer {
-    pub fn new(style: Style) -> Self {
-        Serializer { style }
+impl Indentation {
+    pub fn write(&self, w: &mut impl Write, n: usize) -> io::Result<()> {
+        for _ in 0..n {
+            match self {
+                Indentation::Tabs => write!(w, "\t")?,
+                Indentation::Spaces(m) => {
+                    for _ in 0..*m {
+                        write!(w, " ")?;
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 }
 
-impl<'a> ser::Serializer for &'a mut Serializer {
-    type Ok = Expr;
+// The Write serializer is just a wrapper around AST serializer. We need
+// complete AST expressions before the correct write format can be determined.
+
+impl<'a, W: Write> ser::Serializer for &'a mut Serializer<W> {
+    type Ok = ();
     type Error = Error;
 
-    type SerializeSeq = SeqSerializer;
-    type SerializeTuple = SeqSerializer;
-    type SerializeTupleStruct = SeqSerializer;
-    type SerializeTupleVariant = SeqSerializer;
-    type SerializeMap = MapSerializer;
-    type SerializeStruct = MapSerializer;
-    type SerializeStructVariant = MapSerializer;
+    type SerializeSeq = Sequence<'a, W>;
+    type SerializeTuple = Sequence<'a, W>;
+    type SerializeTupleStruct = Sequence<'a, W>;
+    type SerializeTupleVariant = Sequence<'a, W>;
+    type SerializeMap = Sequence<'a, W>;
+    type SerializeStruct = Sequence<'a, W>;
+    type SerializeStructVariant = Sequence<'a, W>;
 
-    fn serialize_bool(self, v: bool) -> Result<Expr> {
-        Expr::from(self.style, v)
+    fn serialize_bool(self, v: bool) -> Result<Self::Ok> {
+        self.write(&Ast.serialize_bool(v)?)
     }
 
-    fn serialize_i8(self, v: i8) -> Result<Expr> {
-        Expr::from(self.style, v)
+    fn serialize_i8(self, v: i8) -> Result<Self::Ok> {
+        self.write(&Ast.serialize_i8(v)?)
     }
 
-    fn serialize_i16(self, v: i16) -> Result<Expr> {
-        Expr::from(self.style, v)
+    fn serialize_i16(self, v: i16) -> Result<Self::Ok> {
+        self.write(&Ast.serialize_i16(v)?)
     }
 
-    fn serialize_i32(self, v: i32) -> Result<Expr> {
-        Expr::from(self.style, v)
+    fn serialize_i32(self, v: i32) -> Result<Self::Ok> {
+        self.write(&Ast.serialize_i32(v)?)
     }
 
-    fn serialize_i64(self, v: i64) -> Result<Expr> {
-        Expr::from(self.style, v)
+    fn serialize_i64(self, v: i64) -> Result<Self::Ok> {
+        self.write(&Ast.serialize_i64(v)?)
     }
 
-    fn serialize_u8(self, v: u8) -> Result<Expr> {
-        Expr::from(self.style, v)
+    fn serialize_u8(self, v: u8) -> Result<Self::Ok> {
+        self.write(&Ast.serialize_u8(v)?)
     }
 
-    fn serialize_u16(self, v: u16) -> Result<Expr> {
-        Expr::from(self.style, v)
+    fn serialize_u16(self, v: u16) -> Result<Self::Ok> {
+        self.write(&Ast.serialize_u16(v)?)
     }
 
-    fn serialize_u32(self, v: u32) -> Result<Expr> {
-        Expr::from(self.style, v)
+    fn serialize_u32(self, v: u32) -> Result<Self::Ok> {
+        self.write(&Ast.serialize_u32(v)?)
     }
 
-    fn serialize_u64(self, v: u64) -> Result<Expr> {
-        Expr::from(self.style, v)
+    fn serialize_u64(self, v: u64) -> Result<Self::Ok> {
+        self.write(&Ast.serialize_u64(v)?)
     }
 
-    fn serialize_f32(self, v: f32) -> Result<Expr> {
-        Expr::from(self.style, v)
+    fn serialize_f32(self, v: f32) -> Result<Self::Ok> {
+        self.write(&Ast.serialize_f32(v)?)
     }
 
-    fn serialize_f64(self, v: f64) -> Result<Expr> {
-        Expr::from(self.style, v)
+    fn serialize_f64(self, v: f64) -> Result<Self::Ok> {
+        self.write(&Ast.serialize_f64(v)?)
     }
 
-    fn serialize_char(self, v: char) -> Result<Expr> {
-        // Going to disallow any whitespace, not just IDM ASCII ones here for
-        // clarity's sake.
-        if v.is_whitespace() {
-            return err!("Can't serialize whitespace chars");
-        }
-
-        Expr::from(self.style, v)
+    fn serialize_char(self, v: char) -> Result<Self::Ok> {
+        self.write(&Ast.serialize_char(v)?)
     }
 
-    fn serialize_str(self, v: &str) -> Result<Expr> {
-        if v.trim_end_matches(CharExt::is_idm_whitespace).is_empty() {
-            Ok(Atom(Value::empty_line()))
-        } else {
-            Expr::from(self.style, v)
-        }
+    fn serialize_str(self, v: &str) -> Result<Self::Ok> {
+        self.write(&Ast.serialize_str(v)?)
     }
 
-    fn serialize_bytes(self, _: &[u8]) -> Result<Expr> {
-        unimplemented!();
+    fn serialize_bytes(self, v: &[u8]) -> Result<Self::Ok> {
+        self.write(&Ast.serialize_bytes(v)?)
     }
 
-    fn serialize_none(self) -> Result<Expr> {
-        Ok(Expr::None)
+    fn serialize_none(self) -> Result<Self::Ok> {
+        self.write(&Ast.serialize_none()?)
     }
 
-    fn serialize_some<T>(self, value: &T) -> Result<Expr>
+    fn serialize_some<T: ?Sized>(self, value: &T) -> Result<Self::Ok>
     where
-        T: ?Sized + Serialize,
+        T: serde::Serialize,
     {
-        value.serialize(self)
+        self.write(&Ast.serialize_some(value)?)
     }
 
-    fn serialize_unit(self) -> Result<Expr> {
-        Ok(Expr::None)
+    fn serialize_unit(self) -> Result<Self::Ok> {
+        self.write(&Ast.serialize_unit()?)
     }
 
-    fn serialize_unit_struct(self, _name: &'static str) -> Result<Expr> {
-        Ok(Expr::None)
+    fn serialize_unit_struct(self, name: &'static str) -> Result<Self::Ok> {
+        self.write(&Ast.serialize_unit_struct(name)?)
     }
 
     fn serialize_unit_variant(
         self,
-        _name: &'static str,
-        _variant_index: u32,
+        name: &'static str,
+        variant_index: u32,
         variant: &'static str,
-    ) -> Result<Expr> {
-        Expr::from(self.style, variant)
+    ) -> Result<Self::Ok> {
+        self.write(&Ast.serialize_unit_variant(name, variant_index, variant)?)
     }
 
-    fn serialize_newtype_struct<T>(
+    fn serialize_newtype_struct<T: ?Sized>(
         self,
-        _name: &'static str,
+        name: &'static str,
         value: &T,
-    ) -> Result<Expr>
+    ) -> Result<Self::Ok>
     where
-        T: ?Sized + Serialize,
+        T: serde::Serialize,
     {
-        value.serialize(self)
+        self.write(&Ast.serialize_newtype_struct(name, value)?)
     }
 
-    fn serialize_newtype_variant<T>(
+    fn serialize_newtype_variant<T: ?Sized>(
         self,
-        _name: &'static str,
-        _variant_index: u32,
+        name: &'static str,
+        variant_index: u32,
         variant: &'static str,
         value: &T,
-    ) -> Result<Expr>
+    ) -> Result<Self::Ok>
     where
-        T: ?Sized + Serialize,
+        T: serde::Serialize,
     {
-        Ok(MapElement(vec![
-            variant.serialize(&mut *self)?,
-            value.serialize(&mut *self)?,
-        ]))
+        self.write(&Ast.serialize_newtype_variant(
+            name,
+            variant_index,
+            variant,
+            value,
+        )?)
     }
 
     fn serialize_seq(self, len: Option<usize>) -> Result<Self::SerializeSeq> {
-        Ok(SeqSerializer::new(self.style, len.unwrap_or(0)))
+        Ok(Sequence::new(self, Ast.serialize_seq(len)?))
     }
 
     fn serialize_tuple(self, len: usize) -> Result<Self::SerializeTuple> {
-        if len != 2 {
-            unimplemented!("Non-pair (len = {}) tuples are not supported", len);
-        }
-        Ok(SeqSerializer::new(self.style, len).is_pair())
+        Ok(Sequence::new(self, Ast.serialize_tuple(len)?))
     }
 
     fn serialize_tuple_struct(
         self,
-        _name: &'static str,
+        name: &'static str,
         len: usize,
     ) -> Result<Self::SerializeTupleStruct> {
-        Ok(SeqSerializer::new(self.style, len))
+        Ok(Sequence::new(self, Ast.serialize_tuple_struct(name, len)?))
     }
 
     fn serialize_tuple_variant(
         self,
-        _name: &'static str,
-        _variant_index: u32,
+        name: &'static str,
+        variant_index: u32,
         variant: &'static str,
         len: usize,
     ) -> Result<Self::SerializeTupleVariant> {
-        Ok(SeqSerializer::new(self.style, len).enum_variant(variant))
+        Ok(Sequence::new(
+            self,
+            Ast.serialize_tuple_variant(name, variant_index, variant, len)?,
+        ))
     }
 
-    fn serialize_map(self, _len: Option<usize>) -> Result<Self::SerializeMap> {
-        Ok(MapSerializer::new(self.style))
+    fn serialize_map(self, len: Option<usize>) -> Result<Self::SerializeMap> {
+        Ok(Sequence::new(self, Ast.serialize_map(len)?))
     }
 
     fn serialize_struct(
         self,
-        _name: &'static str,
+        name: &'static str,
         len: usize,
     ) -> Result<Self::SerializeStruct> {
-        self.serialize_map(Some(len))
+        Ok(Sequence::new(self, Ast.serialize_struct(name, len)?))
     }
 
     fn serialize_struct_variant(
         self,
-        _name: &'static str,
-        _variant_index: u32,
+        name: &'static str,
+        variant_index: u32,
         variant: &'static str,
-        _len: usize,
+        len: usize,
     ) -> Result<Self::SerializeStructVariant> {
-        Ok(MapSerializer::new(self.style).enum_variant(variant))
+        Ok(Sequence::new(
+            self,
+            Ast.serialize_struct_variant(name, variant_index, variant, len)?,
+        ))
     }
 }
 
-struct SeqSerializer {
-    idx: usize,
-    is_pair: bool,
-    /// Will contain the first item if this is an indent-style tuple.
-    acc: Expr,
-    /// Name of the enum variant used by enum implementations.
-    enum_variant: Expr,
-    style: Style,
+pub struct Sequence<'a, W: Write> {
+    ser: &'a mut Serializer<W>,
+    expr: Expr,
 }
 
-impl SeqSerializer {
-    pub fn new(style: Style, _len: usize) -> Self {
-        SeqSerializer {
-            idx: 0,
-            is_pair: false,
-            acc: Default::default(),
-            enum_variant: Default::default(),
-            style,
-        }
+impl<'a, W: Write> Sequence<'a, W> {
+    fn new(ser: &'a mut Serializer<W>, expr: Expr) -> Self {
+        Sequence { ser, expr }
     }
 
-    pub fn is_pair(mut self) -> Self {
-        self.is_pair = true;
-        self
-    }
-
-    pub fn enum_variant(mut self, enum_variant: &str) -> Self {
-        self.enum_variant = Expr::from(self.style, enum_variant)
-            .expect("Invalid enum variant name");
-        self
-    }
-
-    fn serialize_tuple_element<T>(&mut self, value: &T) -> Result<()>
-    where
-        T: ?Sized + Serialize,
-    {
-        if self.idx == 0 {
-            if self.is_pair {
-                self.acc = Pair(Vec::new());
-            } else {
-                self.acc = MapElement(Vec::new());
-            }
-        }
-        self.idx += 1;
-
-        self.acc
-            .push(value.serialize(&mut Serializer::new(self.style))?);
-        Ok(())
+    fn write(self) -> Result<()> {
+        self.ser.write(&self.expr)
     }
 }
 
-impl ser::SerializeSeq for SeqSerializer {
-    type Ok = Expr;
+impl<'a, W: Write> ser::SerializeSeq for Sequence<'a, W> {
+    type Ok = ();
     type Error = Error;
 
-    fn serialize_element<T>(&mut self, value: &T) -> Result<()>
+    fn serialize_element<T: ?Sized>(&mut self, value: &T) -> Result<()>
     where
-        T: ?Sized + Serialize,
+        T: serde::Serialize,
     {
-        if self.idx == 0 {
-            // This is seq, not tuple. Immediately start doing a seq block,
-            // don't make it into Section.
-            self.acc = Seq(Vec::new());
-        }
-        self.idx += 1;
-
-        self.acc
-            .push(value.serialize(&mut Serializer::new(self.style))?);
-        Ok(())
+        self.expr.serialize_element(value)
     }
 
-    fn end(self) -> Result<Expr> {
-        Ok(self.acc)
+    fn end(mut self) -> Result<Self::Ok> {
+        self.expr = self.expr.end()?;
+        self.write()
     }
 }
 
-impl ser::SerializeTuple for SeqSerializer {
-    type Ok = Expr;
+impl<'a, W: Write> ser::SerializeTuple for Sequence<'a, W> {
+    type Ok = ();
     type Error = Error;
 
-    fn serialize_element<T>(&mut self, value: &T) -> Result<()>
+    fn serialize_element<T: ?Sized>(&mut self, value: &T) -> Result<()>
     where
-        T: ?Sized + Serialize,
+        T: serde::Serialize,
     {
-        self.serialize_tuple_element(value)
+        self.expr.serialize_element(value)
     }
 
-    fn end(self) -> Result<Expr> {
-        Ok(self.acc)
+    fn end(mut self) -> Result<Self::Ok> {
+        self.expr = self.expr.end()?;
+        self.write()
     }
 }
 
-impl ser::SerializeTupleStruct for SeqSerializer {
-    type Ok = Expr;
+impl<'a, W: Write> ser::SerializeTupleStruct for Sequence<'a, W> {
+    type Ok = ();
     type Error = Error;
 
     fn serialize_field<T>(&mut self, value: &T) -> Result<()>
     where
         T: ?Sized + Serialize,
     {
-        self.serialize_tuple_element(value)
+        self.expr.serialize_field(value)
     }
 
-    fn end(self) -> Result<Expr> {
-        Ok(self.acc)
+    fn end(mut self) -> Result<Self::Ok> {
+        self.expr = self.expr.end()?;
+        self.write()
     }
 }
 
-impl ser::SerializeTupleVariant for SeqSerializer {
-    type Ok = Expr;
+impl<'a, W: Write> ser::SerializeTupleVariant for Sequence<'a, W> {
+    type Ok = ();
     type Error = Error;
 
     fn serialize_field<T>(&mut self, value: &T) -> Result<()>
     where
         T: ?Sized + Serialize,
     {
-        self.serialize_tuple_element(value)
+        self.expr.serialize_field(value)
     }
 
-    fn end(self) -> Result<Expr> {
-        Ok(MapElement(vec![self.enum_variant, self.acc]))
-    }
-}
-
-struct MapSerializer {
-    values: Vec<(Expr, Expr)>,
-    enum_variant: Expr,
-    style: Style,
-}
-
-impl MapSerializer {
-    pub fn new(style: Style) -> Self {
-        MapSerializer {
-            values: Default::default(),
-            enum_variant: Default::default(),
-            style,
-        }
-    }
-
-    pub fn enum_variant(mut self, enum_variant: &str) -> Self {
-        self.enum_variant = Expr::from(self.style, enum_variant)
-            .expect("Invalid enum variant name");
-        self
+    fn end(mut self) -> Result<Self::Ok> {
+        self.expr = self.expr.end()?;
+        self.write()
     }
 }
 
-impl ser::SerializeMap for MapSerializer {
-    type Ok = Expr;
+impl<'a, W: Write> ser::SerializeMap for Sequence<'a, W> {
+    type Ok = ();
     type Error = Error;
 
-    fn serialize_key<T>(&mut self, key: &T) -> Result<()>
+    fn serialize_key<T: ?Sized>(&mut self, key: &T) -> Result<()>
     where
-        T: ?Sized + Serialize,
+        T: Serialize,
     {
-        let key = key.serialize(&mut Serializer::new(self.style))?;
-        if key.can_be_inlined() {
-            // Put a dummy value, fill it in in serialize_value.
-            self.values.push((key, Expr::None));
-            Ok(())
-        } else {
-            err!("serialize_key: Non-line key {:?}", key)
-        }
+        self.expr.serialize_key(key)
     }
 
-    fn serialize_value<T>(&mut self, value: &T) -> Result<()>
+    fn serialize_value<T: ?Sized>(&mut self, value: &T) -> Result<()>
     where
-        T: ?Sized + Serialize,
+        T: Serialize,
     {
-        // Should have been started by serialize_key before we get here.
-        debug_assert!(!self.values.is_empty());
-
-        let value = value.serialize(&mut Serializer::new(self.style))?;
-        let idx = self.values.len() - 1;
-        if value.is_empty() {
-            // Empty value, do not save.
-            self.values.pop();
-        } else {
-            // Replace dummy value with actual one.
-            let (key, _) = self.values[idx].clone();
-            self.values[idx] = (key, value);
-        }
-
-        Ok(())
+        self.expr.serialize_value(value)
     }
 
-    fn end(self) -> Result<Expr> {
-        let mut ret = Seq(Vec::new());
-        for (key, value) in self.values.into_iter() {
-            ret.push(MapElement(vec![key, value]));
-        }
-        Ok(ret)
+    fn end(mut self) -> Result<Self::Ok> {
+        self.expr = self.expr.end()?;
+        self.write()
     }
 }
 
-impl ser::SerializeStruct for MapSerializer {
-    type Ok = Expr;
+impl<'a, W: Write> ser::SerializeStruct for Sequence<'a, W> {
+    type Ok = ();
     type Error = Error;
 
     fn serialize_field<T>(&mut self, key: &'static str, value: &T) -> Result<()>
     where
         T: ?Sized + Serialize,
     {
-        self.serialize_key(key)?;
-        self.serialize_value(value)
+        self.expr.serialize_field(key, value)
     }
 
-    fn end(self) -> Result<Expr> {
-        let mut ret = Seq(Vec::new());
-        for (key, value) in self.values.into_iter() {
-            ret.push(MapElement(vec![key, value]));
-        }
-        Ok(ret)
+    fn end(mut self) -> Result<Self::Ok> {
+        self.expr = self.expr.end()?;
+        self.write()
     }
 }
 
-impl ser::SerializeStructVariant for MapSerializer {
-    type Ok = Expr;
+impl<'a, W: Write> ser::SerializeStructVariant for Sequence<'a, W> {
+    type Ok = ();
     type Error = Error;
 
     fn serialize_field<T>(&mut self, key: &'static str, value: &T) -> Result<()>
     where
         T: ?Sized + Serialize,
     {
-        ser::SerializeStruct::serialize_field(self, key, value)
+        self.expr.serialize_field(key, value)
     }
 
-    fn end(self) -> Result<Expr> {
-        Ok(MapElement(vec![
-            self.enum_variant.clone(),
-            ser::SerializeStruct::end(self)?,
-        ]))
+    fn end(mut self) -> Result<Self::Ok> {
+        self.expr = self.expr.end()?;
+        self.write()
     }
 }
 
-/// Reformat a multiline string value if necessary so that it will be a valid
-/// IDM fragment in the indentation style of the output.
-///
-/// Returns an error if the string is not a valid IDM fragment to begin with.
-fn reformat_string(output_style: Style, input: String) -> Result<String> {
-    // Leading whitespace can't be handled, fail fast.
-    if let Some(c) = input.chars().next() {
-        if c.is_idm_whitespace() {
-            return err!("Leading whitespace in string value");
-        }
-    }
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-    let input_style = if let Some(input_style) = infer_indent_style(&input) {
-        input_style
-    } else {
-        // If the indent can't be inferred, no input lines are indented,
-        // string can be used as is.
-        return Ok(input);
-    };
+    #[test]
+    fn guess_style() {
+        assert_eq!(Indentation::infer(""), None);
 
-    // The input has some indentation, so it might not be valid IDM. Let's
-    // check that right now. If it deserializes into Outline, it should be
-    // good.
-    let outline: crate::outline::Outline = from_str(&input)?;
+        assert_eq!(
+            Indentation::infer(
+                "\
+foo
+bar"
+            ),
+            None
+        );
 
-    if input_style.compatible_with(&output_style) {
-        // It's valid input and already uses the indentation type we want,
-        // return as is and forget about our outline value.
-        Ok(input)
-    } else {
-        // Otherwise fix the indentation by reserializing the outline.
+        assert_eq!(
+            Indentation::infer(
+                "\
+foo
+ bar
+  baz"
+            ),
+            Some(Indentation::Spaces(1))
+        );
 
-        // NB. A simple outline type should only have single-line line values
-        // that will return None form infer_indent_style, so this does not
-        // lead into infinite recursion as these are again passed through
-        // reformat_string when serializing.
-        let reser = to_string_styled(output_style, &outline)?;
-        Ok(reser)
+        assert_eq!(
+            Indentation::infer(
+                "\
+foo
+    bar"
+            ),
+            Some(Indentation::Spaces(4))
+        );
+        assert_eq!(
+            Indentation::infer(
+                "\
+foo
+\tbar"
+            ),
+            Some(Indentation::Tabs)
+        );
     }
 }
