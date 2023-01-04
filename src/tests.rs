@@ -235,6 +235,21 @@ fn multi_nesting() {
 }
 
 #[test]
+fn word_tables() {
+    // Regular text can be exploded into words with a nested vec.
+    test!(
+        &vec![
+            vec![s("lorem"), s("ipsum"), s("dolor"), s("sit"), s("amet")],
+            vec![s("consectetur"), s("adipiscing"), s("elit")],
+        ],
+        _,
+        "\
+lorem ipsum dolor sit amet
+consectetur adipiscing elit"
+    );
+}
+
+#[test]
 fn section_atoms() {
     // Atoms can be section-like.
     test!(
