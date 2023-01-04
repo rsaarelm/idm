@@ -827,7 +827,7 @@ impl<'a> State<'a> {
             // Only accessible after MapKey, must have a value if MapKey
             // passed
             State::MapValue(_) => false,
-            // Pair halves are considered nonempty if pair was entered
+            // Special halves are considered nonempty if pair was entered
             // succesfully.
             State::SpecialFirst(_) => false,
             State::SpecialSecond(_) => false,
@@ -844,7 +844,7 @@ impl<'a> State<'a> {
             // Only accessible after MapKey, must have a value if MapKey
             // passed
             State::MapValue(_) => false,
-            // Pair halves are considered nonempty if pair was entered
+            // Special halves are considered nonempty if pair was entered
             // succesfully.
             State::SpecialFirst(_) => false,
             State::SpecialSecond(_) => false,
@@ -882,12 +882,12 @@ impl fmt::Display for State<'_> {
             State::MapKey(o) => write!(f, "MapKey(\n{})", o),
             State::MapValue(o) => write!(f, "MapValue(\n{})", o),
             State::SpecialFirst(Fragment::Outline(o)) => {
-                write!(f, "PairFirst(\n{})", o)
+                write!(f, "SpecialFirst(\n{})", o)
             }
             State::SpecialFirst(Fragment::Item(i)) => {
-                write!(f, "PairFirst({})", i)
+                write!(f, "SpecialFirst({})", i)
             }
-            State::SpecialSecond(o) => write!(f, "PairSecond(\n{})", o),
+            State::SpecialSecond(o) => write!(f, "SpecialSecond(\n{})", o),
         }
     }
 }
