@@ -256,13 +256,6 @@ impl Expr {
                 }
                 Ok(self)
             }
-            // Strip empty values from maps and structs
-            Expr::Map(es) => Ok(Expr::Map(
-                es.into_iter().filter(|(_, v)| !v.is_empty()).collect(),
-            )),
-            Expr::Struct(es) => Ok(Expr::Struct(
-                es.into_iter().filter(|(_, v)| !v.is_empty()).collect(),
-            )),
 
             Expr::EnumVariant(a, e) => {
                 Ok(Expr::EnumVariant(a, Box::new(e.normalize()?)))

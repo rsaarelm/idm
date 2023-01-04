@@ -153,6 +153,11 @@ impl<W: Write> Serializer<W> {
             }
             Expr::Map(es) => {
                 for (k, v) in es {
+                    // An Option value set to None, do not emit.
+                    if v.is_empty() {
+                        continue;
+                    }
+
                     self.indent.write(&mut self.w, depth)?;
                     if adorn {
                         write!(&mut self.w, ":")?;
@@ -172,6 +177,11 @@ impl<W: Write> Serializer<W> {
             // TODO: Emit inline structs if configured to do so
             Expr::Struct(es) => {
                 for (k, v) in es {
+                    // An Option value set to None, do not emit.
+                    if v.is_empty() {
+                        continue;
+                    }
+
                     self.indent.write(&mut self.w, depth)?;
                     if adorn {
                         write!(&mut self.w, ":")?;
