@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 // files into a data outline structure.
 
 #[derive(PartialEq, Default, Debug, Serialize, Deserialize)]
-struct DataOutline((IndexMap<String, String>, Vec<(String, DataOutline)>));
+struct DataOutline((IndexMap<String, String>,), Vec<((String,), DataOutline)>);
 
 fn main() {
     let mut buf = String::new();
