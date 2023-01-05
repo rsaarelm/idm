@@ -1,6 +1,6 @@
 use serde::{ser, Serialize};
 
-use crate::{err, parse::CharExt, Error, Result};
+use crate::{err, CharExt, Error, Result};
 
 #[derive(Clone, Default, Debug)]
 pub(crate) enum Expr {

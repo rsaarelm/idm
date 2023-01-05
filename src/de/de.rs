@@ -1,4 +1,4 @@
-use crate::{err, parse::CharExt, parser::Parser, Error, Result};
+use crate::{de::parser::Parser, err, CharExt, Error, Result};
 use serde::de::{self, IntoDeserializer};
 
 pub fn from_str<'a, T>(input: &'a str) -> crate::Result<T>

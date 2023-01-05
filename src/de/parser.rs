@@ -3,9 +3,9 @@
 use std::{borrow::Cow, fmt, str::FromStr};
 
 use crate::{
-    err,
-    fragment::{Fragment, Outline},
-    parse, Error, Result,
+    de::fragment::{Fragment, Outline},
+    de::parse,
+    err, Error, Result,
 };
 
 pub struct Parser<'a> {

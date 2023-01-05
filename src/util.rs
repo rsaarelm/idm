@@ -3,8 +3,20 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
-use crate::{from_str, parse::CharExt, to_string};
+use crate::{from_str, to_string};
 use serde::{de, de::DeserializeOwned, ser, Deserialize, Serialize};
+
+pub trait CharExt {
+    fn is_idm_whitespace(self) -> bool;
+}
+
+impl CharExt for char {
+    fn is_idm_whitespace(self) -> bool {
+        // NBSP is not counted as whitespace, so you can do weird tricks with
+        // it.
+        self == ' ' || self == '\t' || self == '\n'
+    }
+}
 
 /// Try to convert a value of one type into a value of a different type that
 /// has the same IDM serialization.

@@ -3,10 +3,9 @@ use std::io::{self, Write};
 use serde::{ser, Serialize};
 
 use crate::{
-    ast::{Ast, Expr},
     err,
-    parse::CharExt,
-    Error, Result,
+    ser::ast::{Ast, Expr},
+    CharExt, Error, Result,
 };
 
 /// Serialize a value using the default indentation style.

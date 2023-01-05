@@ -1,6 +1,8 @@
 //! Stateless parsing primitivies.
 use std::fmt;
 
+use crate::CharExt;
+
 type ParseResult<'a, T> = std::result::Result<(T, &'a str), &'a str>;
 
 /// Extract a whitespace-separated word from the start of the input. Skip all
@@ -97,18 +99,6 @@ fn line_indent(input: &str) -> ParseResult<Option<Indent>> {
 
     // At the end of input, by convention EOF has indent level 0.
     Ok((Some(Indent::default()), ""))
-}
-
-pub trait CharExt {
-    fn is_idm_whitespace(self) -> bool;
-}
-
-impl CharExt for char {
-    fn is_idm_whitespace(self) -> bool {
-        // NBSP is not counted as whitespace, so you can do weird tricks with
-        // it.
-        self == ' ' || self == '\t' || self == '\n'
-    }
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
@@ -219,7 +209,10 @@ impl fmt::Display for Indent {
 
 #[cfg(test)]
 mod tests {
-    use crate::parse::{self, CharExt, Indent};
+    use crate::{
+        de::parse::{self, Indent},
+        CharExt,
+    };
 
     #[test]
     fn test_whitespace() {

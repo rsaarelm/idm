@@ -1,9 +1,8 @@
 use std::fmt;
 
 use crate::{
-    err,
-    parse::{self, CharExt, Indent},
-    Error, Result,
+    de::parse::{self, Indent},
+    err, CharExt, Error, Result,
 };
 
 /// Structural type for fragments of an IDM document.
