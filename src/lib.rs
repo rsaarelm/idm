@@ -6,7 +6,7 @@ pub use error::{Error, Result};
 
 mod outline;
 
-mod ser;
+pub mod ser;
 pub use ser::{to_string, to_string_styled, to_string_styled_like};
 
 mod util;
