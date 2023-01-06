@@ -334,6 +334,15 @@ impl<'a> Item<'a> {
                 .nth(1)
                 .map_or(false, |c| !c.is_idm_whitespace())
     }
+
+    pub fn pop_word(&mut self) -> Option<&'a str> {
+        if let Ok((word, rest)) = parse::word(self.head) {
+            self.head = rest;
+            Some(word)
+        } else {
+            None
+        }
+    }
 }
 
 impl fmt::Display for Item<'_> {

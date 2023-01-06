@@ -4,7 +4,7 @@ use std::{borrow::Cow, fmt, str::FromStr};
 
 use crate::{
     de::{
-        fragment::{Fragment, Outline},
+        fragment::{Fragment, Item, Outline},
         parse,
     },
     err, Error, Result,
@@ -233,7 +233,8 @@ enum State<'a> {
     Sequence(Outline<'a>),
 
     /// A line being split into individual words.
-    Words(Vec<&'a str>),
+    Words(Item<'a>),
+
     /// Value fields of an inline struct.
     InlineStruct {
         words: Vec<&'a str>,
@@ -281,7 +282,7 @@ impl<'a> State<'a> {
                 State::Sequence(o)
             }
             State::Words(mut words) => {
-                if let Some(word) = words.pop() {
+                if let Some(word) = words.pop_word() {
                     ret = Ok(Cow::from(word));
                 }
                 State::Words(words)
@@ -396,9 +397,7 @@ impl<'a> State<'a> {
                 Default::default()
             }
             State::Document(Fragment::Item(i)) if i.is_line() => {
-                let (mut words, _) = parse::words(i.head);
-                words.reverse();
-                ret = Ok(State::Words(words));
+                ret = Ok(State::Words(i));
                 Default::default()
             }
             State::Document(Fragment::Outline(o)) => {
@@ -417,9 +416,7 @@ impl<'a> State<'a> {
                     }
                     Some(Fragment::Item(i)) if i.is_line() => {
                         // Horizontal inline sequence.
-                        let (mut words, _) = parse::words(i.head);
-                        words.reverse();
-                        ret = Ok(State::Words(words));
+                        ret = Ok(State::Words(i));
                     }
                     None => {}
                     _ => {
@@ -437,9 +434,7 @@ impl<'a> State<'a> {
                 match o.pop() {
                     Some(i) if i.is_line() => {
                         // Horizontal sequence from headline.
-                        let (mut words, _) = parse::words(i.head);
-                        words.reverse();
-                        ret = Ok(State::Words(words));
+                        ret = Ok(State::Words(i));
                         // Return to map key for rest of stack.
                         State::MapKey(o)
                     }
@@ -823,7 +818,7 @@ impl<'a> State<'a> {
         match self {
             State::Document(f) => f.is_empty(),
             State::Sequence(o) => o.is_empty_or_blank(),
-            State::Words(w) => w.is_empty(),
+            State::Words(w) => w.is_blank(),
             State::InlineStruct { words, .. } => words.is_empty(),
             State::MapKey(o) => o.is_empty_or_blank(),
             // Only accessible after MapKey, must have a value if MapKey
@@ -840,7 +835,7 @@ impl<'a> State<'a> {
         match self {
             State::Document(f) => f.is_empty(),
             State::Sequence(o) => o.is_empty(),
-            State::Words(w) => w.is_empty(),
+            State::Words(w) => w.is_blank(),
             State::InlineStruct { words, .. } => words.is_empty(),
             State::MapKey(o) => o.is_empty(),
             // Only accessible after MapKey, must have a value if MapKey
@@ -863,11 +858,7 @@ impl fmt::Display for State<'_> {
             State::Document(Fragment::Item(i)) => write!(f, "Document({i})"),
             State::Sequence(o) => write!(f, "Sequence(\n{o})"),
             State::Words(words) => {
-                write!(f, "Words(")?;
-                for w in words.iter().rev() {
-                    write!(f, " {w}")?;
-                }
-                write!(f, ")")
+                write!(f, "Words({words})")
             }
             State::InlineStruct { words, fields } => {
                 writeln!(f, "InlineStruct(")?;
