@@ -228,8 +228,7 @@ enum State<'a> {
     /// Complete document
     Document(Fragment<'a>),
 
-    /// The rest of an outline being split into individual items. Cannot
-    /// diverge into the special form.
+    /// Vertical list of items.
     Sequence(Outline<'a>),
 
     /// A line being split into individual words.
@@ -243,6 +242,7 @@ enum State<'a> {
 
     /// Map iteration returning a key next.
     MapKey(Outline<'a>),
+
     /// Map iteration returning a value next.
     ///
     /// If the top of the outline is a line item, the value is the line, if
@@ -253,6 +253,7 @@ enum State<'a> {
     ///
     /// Waiting for next operation to decide how to proceed.
     SpecialFirst(Fragment<'a>),
+
     /// Second element of the special form.
     SpecialSecond(Outline<'a>),
 }
