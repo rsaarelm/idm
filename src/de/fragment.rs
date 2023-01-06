@@ -301,7 +301,7 @@ impl<'a> Item<'a> {
 
     fn write(&self, indent: Indent, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if !self.head.is_empty() {
-            write!(f, "{}{}", indent, self.head)?;
+            write!(f, "{indent}{}", self.head)?;
         }
         if !self.body.0.is_empty() {
             writeln!(f)?;

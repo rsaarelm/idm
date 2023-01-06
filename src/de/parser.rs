@@ -3,8 +3,10 @@
 use std::{borrow::Cow, fmt, str::FromStr};
 
 use crate::{
-    de::fragment::{Fragment, Outline},
-    de::parse,
+    de::{
+        fragment::{Fragment, Outline},
+        parse,
+    },
     err, Error, Result,
 };
 
@@ -856,14 +858,14 @@ impl fmt::Display for State<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             State::Document(Fragment::Outline(o)) => {
-                write!(f, "Document(\n{})", o)
+                write!(f, "Document(\n{o})")
             }
-            State::Document(Fragment::Item(i)) => write!(f, "Document({})", i),
-            State::Sequence(o) => write!(f, "Sequence(\n{})", o),
+            State::Document(Fragment::Item(i)) => write!(f, "Document({i})"),
+            State::Sequence(o) => write!(f, "Sequence(\n{o})"),
             State::Words(words) => {
                 write!(f, "Words(")?;
                 for w in words.iter().rev() {
-                    write!(f, " {}", w)?;
+                    write!(f, " {w}")?;
                 }
                 write!(f, ")")
             }
@@ -871,23 +873,23 @@ impl fmt::Display for State<'_> {
                 writeln!(f, "InlineStruct(")?;
                 write!(f, " ")?;
                 for a in fields.iter().rev() {
-                    write!(f, " {}", a)?;
+                    write!(f, " {a}")?;
                 }
                 writeln!(f)?;
                 for w in words.iter().rev() {
-                    write!(f, " {}", w)?;
+                    write!(f, " {w}")?;
                 }
                 write!(f, ")")
             }
-            State::MapKey(o) => write!(f, "MapKey(\n{})", o),
-            State::MapValue(o) => write!(f, "MapValue(\n{})", o),
+            State::MapKey(o) => write!(f, "MapKey(\n{o})"),
+            State::MapValue(o) => write!(f, "MapValue(\n{o})"),
             State::SpecialFirst(Fragment::Outline(o)) => {
-                write!(f, "SpecialFirst(\n{})", o)
+                write!(f, "SpecialFirst(\n{o})")
             }
             State::SpecialFirst(Fragment::Item(i)) => {
-                write!(f, "SpecialFirst({})", i)
+                write!(f, "SpecialFirst({i})")
             }
-            State::SpecialSecond(o) => write!(f, "SpecialSecond(\n{})", o),
+            State::SpecialSecond(o) => write!(f, "SpecialSecond(\n{o})"),
         }
     }
 }
