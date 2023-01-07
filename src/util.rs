@@ -7,6 +7,7 @@ use crate::{from_str, to_string};
 use serde::{de, de::DeserializeOwned, ser, Deserialize, Serialize};
 
 pub trait CharExt {
+    #[allow(clippy::wrong_self_convention)]
     fn is_idm_whitespace(self) -> bool;
 }
 

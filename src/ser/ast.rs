@@ -176,7 +176,8 @@ impl Expr {
                 for (i, e) in es.iter().enumerate() {
                     if i < last && !e.is_word() {
                         return false;
-                    } else if i == last && !e.is_line() {
+                    }
+                    if i == last && !e.is_line() {
                         // Last tuple item can be line-like and whole tuple is
                         // still parsed as line.
                         return false;
