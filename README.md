@@ -94,6 +94,18 @@ single-line documents. A single line with a trailing newline is read as a
 single-item outline, while a single line without a trailing newline is read as
 a fragment that may be interpreted as a horizontal sequence.
 
+```rust
+// No trailing newline, parses as horizontal sequence.
+assert_eq!(
+    idm::from_str::<Vec<String>>("a b").unwrap(),
+    vec!["a".to_string(), "b".to_string()]);
+
+// Trailing newline present, parses as single-item vertical sequence.
+assert_eq!(
+    idm::from_str::<Vec<String>>("a b\n").unwrap(),
+    vec!["a b".to_string()]);
+```
+
 Some parts of an IDM document may correspond to multi-line string values from
 serialized user data, but they must still follow IDM's indentation conventions
 along with the rest of the document. String values with leading whitespace,
