@@ -10,9 +10,7 @@ pub mod ser;
 pub use ser::{to_string, to_string_styled, to_string_styled_like, Serializer};
 
 mod util;
-pub use util::{
-    transmute, AsVec, CharExt, ColonPair, DefaultDash, UnderlineSpaces,
-};
+pub use util::{transmute, AsVec, CharExt, DefaultDash, UnderlineSpaces};
 
 #[cfg(doctest)]
 #[doc = include_str!("../README.md")]

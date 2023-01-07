@@ -6,10 +6,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
-### Additions
+### Added
 - Publicly visible `Serializer` and `Deserializer` types.
 
-### Changes
+### Changed
 - The IDM special structures are now marked with a singleton tuple as the
   first element of a tuple or tuple struct pair. Regular non-struct tuples no
   longer have intrinsic special treatment and work like sequences.
@@ -27,19 +27,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   column that are left-padded with NBSP to be valid IDM.
 - Minor improvement in error value API ergonomics
 
+### Removed
+- `ColonPair` type removed from the utilities module and preserved as an
+  example. It's too marginal and opinionated to have in the core utilities.
+
 ## [0.3.2] - 2022-11-03
 New release to fix cargo crate that had junk included.
 
 ## [0.3.1] - 2022-09-16
-### Additions
+
+### Added
 - Enumeration type support
 
 ## [0.3.0] - 2022-04-18
-### Additions
+
+### Added
 - Horizontal struct support
 - Utility wrapper types that do two-way value transformations during
   serialization, for example for allowing map-like inline values.
-### Changes
+
+### Changed
 - Horizontal sequences can now show up at the parsing top level and are
   distinguished from vertical sequences by the input having no newlines.
 - Unified structs and maps, syntactic sugar replaces separate struct syntax.
@@ -59,16 +66,19 @@ New release to fix cargo crate that had junk included.
   state transitions instead of the previous monolithic parser.
 
 ## [0.2.0] - 2021-09-09
-### Additions
+
+### Added
 - Comment syntax
 - Error reporting with line numbers
 - Spaces are also supported for indentation
-### Changes
+
+### Changed
 - Missing headlines (double indentation) are no longer supported
 - Raw mode is now indicated by byte buffer type instead of `Option`
 - Comma separator syntax is removed, comments are now used as structural
   separators
-### Fixes
+
+### Fixed
 - Section-like pair tuples are parsed correctly
 
 ## [0.1.0] - 2021-04-10

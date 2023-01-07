@@ -141,109 +141,11 @@ impl<T: Default> DerefMut for UnderlineSpaces<T> {
     }
 }
 
-/// Wrapper that merges two word-like elements into a single word-like element
-/// with a connecting colon.
-///
-/// ```
-/// use idm::ColonPair;
-///
-/// assert_eq!(
-///     idm::from_str::<ColonPair<String, String>>("a:b").unwrap(),
-///     ColonPair("a".to_string(), "b".to_string())
-/// );
-/// assert_eq!(
-///     idm::to_string(&ColonPair("x".to_string(), "y".to_string())).unwrap(),
-///     "x:y"
-/// );
-/// ```
-#[derive(Copy, Clone, Default, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
-pub struct ColonPair<T, U>(pub T, pub U);
-
-impl<'de, T: DeserializeOwned, U: DeserializeOwned> Deserialize<'de>
-    for ColonPair<T, U>
-{
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let ret = String::deserialize(deserializer)?;
-        if let Some((head, tail)) = ret.split_once(':') {
-            let head = from_str(head).map_err(de::Error::custom)?;
-            let tail = from_str(tail).map_err(de::Error::custom)?;
-            Ok(ColonPair(head, tail))
-        } else {
-            Err(de::Error::custom("No colon found in value"))
-        }
-    }
-}
-
-impl<T: Serialize, U: Serialize> Serialize for ColonPair<T, U> {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        let head = to_string(&self.0).map_err(ser::Error::custom)?;
-        let tail = to_string(&self.1).map_err(ser::Error::custom)?;
-        if head.chars().any(|c| c.is_idm_whitespace() || c == ':')
-            || tail.chars().any(|c| c.is_idm_whitespace())
-        {
-            return Err(ser::Error::custom(
-                "ColonPair: halves are not words or head contains a colon",
-            ));
-        }
-        format!("{}:{}", head, tail).serialize(serializer)
-    }
-}
-
-impl<T, U> Into<(T, U)> for ColonPair<T, U> {
-    fn into(self) -> (T, U) {
-        (self.0, self.1)
-    }
-}
-
-impl<T, U> From<(T, U)> for ColonPair<T, U> {
-    fn from((t, u): (T, U)) -> Self {
-        ColonPair(t, u)
-    }
-}
-
 /// A wrapper that causes the wrapped container to be serialized as a `Vec`
 /// collected from its iterated values.
 ///
 /// The item type of the container needs to be given as the second type
 /// parameter.
-///
-/// ```
-/// use std::collections::BTreeMap;
-/// use idm::{AsVec, ColonPair, UnderlineSpaces};
-///
-/// type InlineMap = AsVec<
-///     BTreeMap<String, UnderlineSpaces<String>>,
-///     (String, UnderlineSpaces<String>),
-///     ColonPair<String, UnderlineSpaces<String>>,
-/// >;
-///
-/// assert_eq!(
-///     idm::from_str::<Vec<InlineMap>>(
-///         "title:Structure_and_Interpretation_of_Computer_Programs  isbn:0262010771\n\
-///          title:A_Mathematical_Theory_of_Communication             doi:10.1002/j.1538-7305.1948.tb01338.x\n"
-///     )
-///     .unwrap(),
-///     vec![
-///         AsVec::new(BTreeMap::from([
-///             ("title".into(), UnderlineSpaces(
-///                 "Structure and Interpretation of Computer Programs".into())),
-///             ("isbn".into(), UnderlineSpaces("0262010771".into()))
-///         ])),
-///         AsVec::new(BTreeMap::from([
-///             ("title".into(), UnderlineSpaces(
-///                 "A Mathematical Theory of Communication".into())),
-///             ("doi".into(), UnderlineSpaces(
-///                 "10.1002/j.1538-7305.1948.tb01338.x".into()))
-///         ])),
-///     ]
-/// );
-/// ```
 #[derive(Copy, Clone, Default, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
 pub struct AsVec<T, U, SU>(pub T, pub PhantomData<U>, pub PhantomData<SU>);
 
