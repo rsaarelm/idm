@@ -115,7 +115,6 @@ impl From<std::string::FromUtf8Error> for Error {
     }
 }
 
-#[macro_export(local_inner_macros)]
 macro_rules! err {
     () => {
         Err($crate::error::Error(""))
@@ -129,3 +128,5 @@ macro_rules! err {
         Err($crate::error::Error::new(std::format!($fmt, $($arg),*)))
     };
 }
+
+pub(crate) use err;

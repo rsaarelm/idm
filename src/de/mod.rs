@@ -28,6 +28,9 @@ where
 pub struct Deserializer<'de>(Parser<'de>);
 
 impl<'de> Deserializer<'de> {
+    /// Construct a deserializer from an input string.
+    ///
+    /// Will fail if the input is not a well-formed IDM outline.
     #[allow(clippy::should_implement_trait)]
     pub fn from_str(input: &'de str) -> Result<Self> {
         Ok(Deserializer(Parser::from_str(input)?))

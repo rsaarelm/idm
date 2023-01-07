@@ -46,7 +46,7 @@ impl fmt::Debug for Outline {
     }
 }
 
-#[macro_export(local_inner_macros)]
+#[allow(unused_macros)]
 macro_rules! outline_elt {
     ([$arg:expr, $($child:tt),+]) => {
         (($arg.into(),), outline![$($child),+])
@@ -55,18 +55,22 @@ macro_rules! outline_elt {
         (($arg.into(),), $crate::outline::Outline::default())
     };
 }
+#[allow(unused_imports)]
+pub(crate) use outline_elt;
 
 /// Construct Outline literals.
-#[macro_export]
+#[allow(unused_macros)]
 macro_rules! outline {
     [$($arg:tt),*] => {
         {
             use std::iter::FromIterator;
             let ret: $crate::outline::Outline =
                 $crate::outline::Outline::from_iter(vec![
-                    $($crate::outline_elt!($arg)),*
+                    $($crate::outline::outline_elt!($arg)),*
                 ].into_iter());
             ret
         }
     }
 }
+#[allow(unused_imports)]
+pub(crate) use outline;

@@ -30,6 +30,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 - `ColonPair` type removed from the utilities module and preserved as an
   example. It's too marginal and opinionated to have in the core utilities.
+- Made some internal macros private that were never intended to be public to
+  begin with.
 
 ## [0.3.2] - 2022-11-03
 New release to fix cargo crate that had junk included.
