@@ -79,9 +79,9 @@ All items of a section body must be indented to the same depth. The following
 outline has invalid syntax:
 
 ```notrust
-A      -- Headline
-    B  -- Item 1: Indent depth 4
-  C    -- Item 2: Indent depth 2, inconsistent dedentation
+Headline
+    Item 1 at indent depth 4
+  Item 2 at indent depth 2, inconsistent dedentation!
 ```
 
 Blank lines are interpreted to have the indent depth of the first non-blank
