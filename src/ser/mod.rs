@@ -1,6 +1,6 @@
 use std::io::{self, Write};
 
-use crate::{err, CharExt, Error, Result};
+use crate::{err, is_whitespace, Error, Result};
 use ast::{Ast, Expr};
 use serde::{ser, Serialize};
 
@@ -236,7 +236,7 @@ impl<W: Write> Serializer<W> {
     fn reformat_string(&self, input: String) -> Result<String> {
         // Leading whitespace can't be handled, fail fast.
         if let Some(c) = input.chars().next() {
-            if c.is_idm_whitespace() {
+            if is_whitespace(c) {
                 return err!("Leading whitespace in string value");
             }
         }
@@ -292,7 +292,7 @@ impl Indentation {
             if c == '\n' {
                 at_line_start = true;
                 continue;
-            } else if !c.is_idm_whitespace() {
+            } else if !is_whitespace(c) {
                 if !prefix.is_empty() {
                     // Got what we wanted.
                     break;
@@ -301,7 +301,7 @@ impl Indentation {
                 }
             }
 
-            if at_line_start && c.is_idm_whitespace() {
+            if at_line_start && is_whitespace(c) {
                 prefix.push(c);
             }
         }

@@ -6,19 +6,6 @@ use std::{
 use crate::{from_str, to_string};
 use serde::{de, de::DeserializeOwned, ser, Deserialize, Serialize};
 
-pub trait CharExt {
-    #[allow(clippy::wrong_self_convention)]
-    fn is_idm_whitespace(self) -> bool;
-}
-
-impl CharExt for char {
-    fn is_idm_whitespace(self) -> bool {
-        // NBSP is not counted as whitespace, so you can do weird tricks with
-        // it.
-        self == ' ' || self == '\t' || self == '\n'
-    }
-}
-
 /// Try to convert a value of one type into a value of a different type that
 /// has the same IDM serialization.
 pub fn transmute<T: Serialize, U: DeserializeOwned>(e: &T) -> crate::Result<U> {

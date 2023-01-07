@@ -1,8 +1,6 @@
 //! Stateless parsing primitivies.
 use std::fmt;
 
-use crate::CharExt;
-
 type ParseResult<'a, T> = std::result::Result<(T, &'a str), &'a str>;
 
 /// Extract a whitespace-separated word from the start of the input. Skip all
@@ -10,12 +8,12 @@ type ParseResult<'a, T> = std::result::Result<(T, &'a str), &'a str>;
 pub fn word(input: &str) -> ParseResult<&str> {
     let end_pos = input
         .char_indices()
-        .find_map(|(i, c)| c.is_idm_whitespace().then_some(i))
+        .find_map(|(i, c)| is_whitespace(c).then_some(i))
         .unwrap_or(input.len());
 
     let next_pos = input[end_pos..]
         .char_indices()
-        .find_map(|(i, c)| (!c.is_idm_whitespace()).then_some(end_pos + i))
+        .find_map(|(i, c)| (!is_whitespace(c)).then_some(end_pos + i))
         .unwrap_or(input.len());
 
     debug_assert!(next_pos >= end_pos);
@@ -80,7 +78,7 @@ fn line_indent(input: &str) -> ParseResult<Option<Indent>> {
     let mut indent = Indent::default();
 
     for (i, c) in input.char_indices() {
-        if !c.is_idm_whitespace() {
+        if !is_whitespace(c) {
             // Content encountered, return what was read so far.
             return Ok((Some(indent), &input[i..]));
         }
@@ -207,21 +205,29 @@ impl fmt::Display for Indent {
     }
 }
 
+/// True for characters that IDM counts as whitespace.
+///
+/// These are the ASCII space, tab and newline. Not, for example, the unicode
+/// NBSP.
+pub fn is_whitespace(c: char) -> bool {
+    // NBSP is not counted as whitespace, so you can do weird tricks with
+    // it.
+    c == ' ' || c == '\t' || c == '\n'
+}
+
 #[cfg(test)]
 mod tests {
-    use crate::{
-        de::parse::{self, Indent},
-        CharExt,
-    };
+    use crate as idm;
+    use crate::de::parse::{self, Indent};
 
     #[test]
     fn test_whitespace() {
-        assert!(' '.is_idm_whitespace());
-        assert!('\t'.is_idm_whitespace());
+        assert!(idm::is_whitespace(' '));
+        assert!(idm::is_whitespace('\t'));
 
         // NBSP is not whitespace to IDM.
         assert!('\u{00a0}'.is_whitespace());
-        assert!(!'\u{00a0}'.is_idm_whitespace());
+        assert!(!idm::is_whitespace('\u{00a0}'));
     }
 
     #[test]

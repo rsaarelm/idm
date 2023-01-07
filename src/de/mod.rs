@@ -1,6 +1,6 @@
 use std::io;
 
-use crate::{err, CharExt, Error, Result};
+use crate::{err, is_whitespace, Error, Result};
 use parser::Parser;
 use serde::de::{self, IntoDeserializer};
 
@@ -135,11 +135,7 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
     where
         V: de::Visitor<'de>,
     {
-        visitor.visit_str(
-            self.0
-                .read_str()?
-                .trim_end_matches(CharExt::is_idm_whitespace),
-        )
+        visitor.visit_str(self.0.read_str()?.trim_end_matches(is_whitespace))
     }
 
     fn deserialize_string<V>(self, visitor: V) -> Result<V::Value>

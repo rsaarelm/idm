@@ -1,6 +1,6 @@
 use serde::{ser, Serialize};
 
-use crate::{err, CharExt, Error, Result};
+use crate::{err, is_whitespace, Error, Result};
 
 #[derive(Clone, Default, Debug)]
 pub(crate) enum Expr {
@@ -53,7 +53,7 @@ impl Expr {
     }
 
     pub fn from_str(s: &str) -> Result<Self> {
-        if s.chars().next().map_or(false, |c| c.is_idm_whitespace()) {
+        if s.chars().next().map_or(false, is_whitespace) {
             return err!("Expr::from_str: Leading whitespace");
         }
 
@@ -65,7 +65,7 @@ impl Expr {
             if c == '\n' {
                 return Ok(Expr::Paragraph(s.to_string()));
             }
-            if c.is_idm_whitespace() {
+            if is_whitespace(c) {
                 is_line = true;
             }
         }
@@ -202,9 +202,9 @@ impl Expr {
             // Paragraphs are sections if all lines after the first are
             // indented.
             Expr::Paragraph(p)
-                if p.lines().skip(1).all(|s| {
-                    s.chars().next().map_or(true, |c| c.is_idm_whitespace())
-                }) =>
+                if p.lines()
+                    .skip(1)
+                    .all(|s| s.chars().next().map_or(true, is_whitespace)) =>
             {
                 true
             }

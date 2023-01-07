@@ -2,7 +2,7 @@ use std::fmt;
 
 use crate::{
     de::parse::{self, Indent},
-    err, CharExt, Error, Result,
+    err, is_whitespace, Error, Result,
 };
 
 /// Structural type for fragments of an IDM document.
@@ -20,14 +20,10 @@ impl Default for Fragment<'_> {
 
 impl<'a> Fragment<'a> {
     pub fn from_str(input: &'a str) -> Result<Self> {
-        if input
-            .chars()
-            .next()
-            .map_or(false, |c| c.is_idm_whitespace())
-        {
+        if input.chars().next().map_or(false, is_whitespace) {
             // Must not start with indentation.
             Err(Error::new("Unexpected indentation").with_line_num(1))
-        } else if input.chars().all(CharExt::is_idm_whitespace) {
+        } else if input.chars().all(is_whitespace) {
             // Empty input is empty.
             Ok(Fragment::Outline(Outline::default()))
         } else if !input.chars().any(|c| c == '\n') {
@@ -175,8 +171,8 @@ impl<'a> Outline<'a> {
                 //
                 // Remove the colon (and any whitespace between colon and
                 // content).
-                self.0[top].head = self.0[top].head[1..]
-                    .trim_start_matches(CharExt::is_idm_whitespace);
+                self.0[top].head =
+                    self.0[top].head[1..].trim_start_matches(is_whitespace);
                 // Accumulate to colon block and continue.
                 colon_block.push(self.0.pop().unwrap());
 
@@ -254,7 +250,7 @@ impl<'a> Item<'a> {
 
         // Strip indentation when putting it in headline.
         // Must always have at least one headline when parsing a block.
-        let head = if line.chars().all(CharExt::is_idm_whitespace) {
+        let head = if line.chars().all(is_whitespace) {
             ""
         } else {
             &line[indent.len()..]
@@ -330,7 +326,7 @@ impl<'a> Item<'a> {
     }
 
     pub fn has_blank_line(&self) -> bool {
-        self.head.chars().all(CharExt::is_idm_whitespace)
+        self.head.chars().all(is_whitespace)
     }
 
     pub fn is_colon_item(&self) -> bool {
@@ -340,7 +336,7 @@ impl<'a> Item<'a> {
                 .head
                 .chars()
                 .nth(1)
-                .map_or(false, |c| !c.is_idm_whitespace())
+                .map_or(false, |c| !is_whitespace(c))
     }
 
     pub fn pop_word(&mut self) -> Option<&'a str> {

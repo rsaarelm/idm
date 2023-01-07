@@ -25,6 +25,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - NBSP and other unicode whitespace is removed when parsing primitive values
   (integers, floats). This allows table rows with a right-aligned leftmost
   column that are left-padded with NBSP to be valid IDM.
+- The check for IDM whitespace is now a standalone function instead of a
+  `char` extension trait method.
 - Minor improvement in error value API ergonomics
 
 ### Removed

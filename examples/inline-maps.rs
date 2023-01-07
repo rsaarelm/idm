@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use idm::{from_str, to_string, AsVec, CharExt, UnderlineSpaces};
+use idm::{from_str, to_string, AsVec, UnderlineSpaces};
 use serde::{
     de::{self, Deserialize, DeserializeOwned},
     ser::{self, Serialize},
@@ -53,8 +53,8 @@ impl<T: Serialize, U: Serialize> Serialize for ColonPair<T, U> {
     {
         let head = to_string(&self.0).map_err(ser::Error::custom)?;
         let tail = to_string(&self.1).map_err(ser::Error::custom)?;
-        if head.chars().any(|c| c.is_idm_whitespace() || c == ':')
-            || tail.chars().any(|c| c.is_idm_whitespace())
+        if head.chars().any(|c| idm::is_whitespace(c) || c == ':')
+            || tail.chars().any(idm::is_whitespace)
         {
             return Err(ser::Error::custom(
                 "ColonPair: halves are not words or head contains a colon",
