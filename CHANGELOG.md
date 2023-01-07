@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Unreleased
 
 ### Additions
-- Publicly visible `Serializer` type.
+- Publicly visible `Serializer` and `Deserializer` types.
 
 ### Changes
 - The IDM special structures are now marked with a singleton tuple as the

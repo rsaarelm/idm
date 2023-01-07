@@ -1,3 +1,5 @@
+use std::io;
+
 use crate::{err, CharExt, Error, Result};
 use parser::Parser;
 use serde::de::{self, IntoDeserializer};
@@ -6,14 +8,31 @@ mod fragment;
 pub(crate) mod parse;
 mod parser;
 
-pub fn from_str<'a, T>(input: &'a str) -> crate::Result<T>
+pub fn from_str<'a, T>(input: &'a str) -> Result<T>
 where
     T: de::Deserialize<'a>,
 {
     T::deserialize(&mut Deserializer::from_str(input)?)
 }
 
-type Deserializer<'de> = Parser<'de>;
+pub fn from_reader<R, T>(mut reader: R) -> Result<T>
+where
+    R: io::Read,
+    T: de::DeserializeOwned,
+{
+    let mut buf = String::new();
+    reader.read_to_string(&mut buf)?;
+    from_str(&buf)
+}
+
+pub struct Deserializer<'de>(Parser<'de>);
+
+impl<'de> Deserializer<'de> {
+    #[allow(clippy::should_implement_trait)]
+    pub fn from_str(input: &'de str) -> Result<Self> {
+        Ok(Deserializer(Parser::from_str(input)?))
+    }
+}
 
 impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
     type Error = Error;
@@ -29,84 +48,84 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
     where
         V: de::Visitor<'de>,
     {
-        visitor.visit_bool(self.read()?)
+        visitor.visit_bool(self.0.read()?)
     }
 
     fn deserialize_i8<V>(self, visitor: V) -> Result<V::Value>
     where
         V: de::Visitor<'de>,
     {
-        visitor.visit_i8(self.read()?)
+        visitor.visit_i8(self.0.read()?)
     }
 
     fn deserialize_i16<V>(self, visitor: V) -> Result<V::Value>
     where
         V: de::Visitor<'de>,
     {
-        visitor.visit_i16(self.read()?)
+        visitor.visit_i16(self.0.read()?)
     }
 
     fn deserialize_i32<V>(self, visitor: V) -> Result<V::Value>
     where
         V: de::Visitor<'de>,
     {
-        visitor.visit_i32(self.read()?)
+        visitor.visit_i32(self.0.read()?)
     }
 
     fn deserialize_i64<V>(self, visitor: V) -> Result<V::Value>
     where
         V: de::Visitor<'de>,
     {
-        visitor.visit_i64(self.read()?)
+        visitor.visit_i64(self.0.read()?)
     }
 
     fn deserialize_u8<V>(self, visitor: V) -> Result<V::Value>
     where
         V: de::Visitor<'de>,
     {
-        visitor.visit_u8(self.read()?)
+        visitor.visit_u8(self.0.read()?)
     }
 
     fn deserialize_u16<V>(self, visitor: V) -> Result<V::Value>
     where
         V: de::Visitor<'de>,
     {
-        visitor.visit_u16(self.read()?)
+        visitor.visit_u16(self.0.read()?)
     }
 
     fn deserialize_u32<V>(self, visitor: V) -> Result<V::Value>
     where
         V: de::Visitor<'de>,
     {
-        visitor.visit_u32(self.read()?)
+        visitor.visit_u32(self.0.read()?)
     }
 
     fn deserialize_u64<V>(self, visitor: V) -> Result<V::Value>
     where
         V: de::Visitor<'de>,
     {
-        visitor.visit_u64(self.read()?)
+        visitor.visit_u64(self.0.read()?)
     }
 
     fn deserialize_f32<V>(self, visitor: V) -> Result<V::Value>
     where
         V: de::Visitor<'de>,
     {
-        visitor.visit_f32(self.read()?)
+        visitor.visit_f32(self.0.read()?)
     }
 
     fn deserialize_f64<V>(self, visitor: V) -> Result<V::Value>
     where
         V: de::Visitor<'de>,
     {
-        visitor.visit_f64(self.read()?)
+        visitor.visit_f64(self.0.read()?)
     }
 
     fn deserialize_char<V>(self, visitor: V) -> Result<V::Value>
     where
         V: de::Visitor<'de>,
     {
-        visitor.visit_char(self.read()?)
+        visitor.visit_char(self.0.read()?)
     }
 
     fn deserialize_str<V>(self, visitor: V) -> Result<V::Value>
@@ -114,7 +133,8 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
         V: de::Visitor<'de>,
     {
         visitor.visit_str(
-            self.read_str()?
+            self.0
+                .read_str()?
                 .trim_end_matches(CharExt::is_idm_whitespace),
         )
     }
@@ -196,9 +216,9 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
     where
         V: de::Visitor<'de>,
     {
-        self.enter_seq()?;
+        self.0.enter_seq()?;
         let ret = visitor.visit_seq(Sequence::new(self))?;
-        self.exit()?;
+        self.0.exit()?;
         Ok(ret)
     }
 
@@ -210,15 +230,15 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
             // This is an singleton tuple, it's the marker for the special
             // form. If this shows up at the start of a sequence, change the
             // sequence into the special pair.
-            self.enter_special()?;
+            self.0.enter_special()?;
         } else {
-            self.enter_tuple(len)?;
+            self.0.enter_tuple(len)?;
         }
         let ret = visitor.visit_seq(Sequence::new(self))?;
         if len > 1 {
             // Don't call exit with special form, it didn't involve a push in
             // the state machine.
-            self.exit()?;
+            self.0.exit()?;
         }
         Ok(ret)
     }
@@ -243,9 +263,9 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
     where
         V: de::Visitor<'de>,
     {
-        self.enter_map()?;
+        self.0.enter_map()?;
         let ret = visitor.visit_map(Sequence::new(self))?;
-        self.exit()?;
+        self.0.exit()?;
         Ok(ret)
     }
 
@@ -258,9 +278,9 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
     where
         V: de::Visitor<'de>,
     {
-        self.enter_struct(fields)?;
+        self.0.enter_struct(fields)?;
         let ret = visitor.visit_map(Sequence::new(self))?;
-        self.exit()?;
+        self.0.exit()?;
         Ok(ret)
     }
 
@@ -273,14 +293,14 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
     where
         V: de::Visitor<'de>,
     {
-        if self.is_word() {
+        if self.0.is_word() {
             // Only a single word, parse unit variant.
-            visitor.visit_enum(self.read_str()?.into_deserializer())
+            visitor.visit_enum(self.0.read_str()?.into_deserializer())
         } else {
             // Nonunit enums look similar to the key-value pairs of a map.
-            self.enter_tuple(2)?;
+            self.0.enter_tuple(2)?;
             let ret = visitor.visit_enum(Enum::new(self))?;
-            self.exit()?;
+            self.0.exit()?;
             Ok(ret)
         }
     }
@@ -304,14 +324,14 @@ impl<'a, 'de> de::SeqAccess<'de> for Sequence<'a, 'de> {
         T: de::DeserializeSeed<'de>,
     {
         // This one you can trust for termination.
-        if self.de.is_really_empty() {
+        if self.de.0.is_really_empty() {
             return Ok(None);
         }
 
         // XXX Hack, can't trust regular is_empty here since if we end up
         // requesting a raw item, there might be a trailing comment that is
         // otherwise interpreted as an empty sequence.
-        if self.de.is_empty() {
+        if self.de.0.is_empty() {
             // XXX: Is it okay to use the same deserializer here instead of
             // using a throwaway clone for when deserialize fails? Current
             // deserializer implementation isn't designed to be cheap to
@@ -334,11 +354,11 @@ impl<'a, 'de> de::MapAccess<'de> for Sequence<'a, 'de> {
     where
         K: de::DeserializeSeed<'de>,
     {
-        if self.de.is_empty() {
+        if self.de.0.is_empty() {
             return Ok(None);
         }
 
-        self.de.enter_tuple(2)?;
+        self.de.0.enter_tuple(2)?;
         seed.deserialize(&mut *self.de).map(Some)
     }
 
@@ -347,7 +367,7 @@ impl<'a, 'de> de::MapAccess<'de> for Sequence<'a, 'de> {
         V: de::DeserializeSeed<'de>,
     {
         let ret = seed.deserialize(&mut *self.de)?;
-        self.de.exit()?;
+        self.de.0.exit()?;
         Ok(ret)
     }
 }

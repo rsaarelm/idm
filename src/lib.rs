@@ -1,5 +1,5 @@
 pub mod de;
-pub use de::from_str;
+pub use de::{from_reader, from_str, Deserializer};
 
 mod error;
 pub use error::{Error, Result};
@@ -7,7 +7,7 @@ pub use error::{Error, Result};
 mod outline;
 
 pub mod ser;
-pub use ser::{to_string, to_string_styled, to_string_styled_like};
+pub use ser::{to_string, to_string_styled, to_string_styled_like, Serializer};
 
 mod util;
 pub use util::{
