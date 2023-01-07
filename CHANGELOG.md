@@ -18,11 +18,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Section-shaped pairs will match the whole headline as the first value and
   the body as the second value. Parsing map items is now equivalent to parsing
   a sequence of pair tuples.
-- The indentations of multiline string values are munged to remain consistent
+- The indentations of multi-line string values are munged to remain consistent
   with current indentation style when serializing if necessary. String values
   that have leading whitespace or are not valid IDM outline fragments will
   fail to serialize.
-- NBSP and other unicode whitespace is removed when parsing primitive values
+- NBSP and other Unicode whitespace is removed when parsing primitive values
   (integers, floats). This allows table rows with a right-aligned leftmost
   column that are left-padded with NBSP to be valid IDM.
 - The check for IDM whitespace is now a standalone function instead of a
@@ -54,7 +54,7 @@ New release to fix cargo crate that had junk included.
 - Horizontal sequences can now show up at the parsing top level and are
   distinguished from vertical sequences by the input having no newlines.
 - Unified structs and maps, syntactic sugar replaces separate struct syntax.
-- Due to struct and map unification, serde's struct flattening can now be used
+- Due to struct and map unification, Serde's struct flattening can now be used
   (though it remains of limited use as all values are read as strings when
   using it).
 - Tuples are no longer allowed as a regular sequence-like serialization

@@ -84,8 +84,8 @@ A      -- Headline
   C    -- Item 2: Indent depth 2, inconsistent dedentation
 ```
 
-Blank lines are interpreted to have the indent depth of the first nonblank
-line after them, or 0 if no nonblank line exists after them. This means that a
+Blank lines are interpreted to have the indent depth of the first non-blank
+line after them, or 0 if no non-blank line exists after them. This means that a
 blank line can never be a section headline, since the headline must have a
 shallower indent depth than the line immediately following it.
 
@@ -94,15 +94,15 @@ single-line documents. A single line with a trailing newline is read as a
 single-item outline, while a single line without a trailing newline is read as
 a fragment that may be interpreted as a horizontal sequence.
 
-Some parts of an IDM document may correspond to multiline string values from
+Some parts of an IDM document may correspond to multi-line string values from
 serialized user data, but they must still follow IDM's indentation conventions
 along with the rest of the document. String values with leading whitespace,
 inconsistent dedentation or indentation that mixes tabs and spaces cannot be
 serialized. If the serialization is using a different indentation style than
-the multiline string (tabs instead of spaces or vice versa), the string is
-rewritten to use the different indentation style. Layout information from the
-original indentation may be lost when this happens, though the logical
-structure of the indentation should always be preserved.
+the multi-line string (tabs instead of spaces or vice versa), the string is
+rewritten to use the different indentation style. Precise indentation depths
+from the original indentation may be lost when this happens, though the
+logical structure of the indentation should always be preserved.
 
 ## Special syntax
 
@@ -123,14 +123,14 @@ dedented comment lines between the sequences:
   6 7
 ```
 
-Colon blocks are lines that start with a colon and immediately followed by a
-non-whitespace character. A colon block is a contiguous run of colon lines,
-with only comments and blank lines allowed in between:
+Colon lines start with a colon immediately followed by a non-whitespace
+character. A colon block is a contiguous run of colon lines, with only
+comments and blank lines allowed in between:
 
 ```notrust
 :a 1
 :b 2
-Not part of block
+Not part of the attribute block
 ```
 
 A colon block is syntactic sugar for an extra level of indentation and a
@@ -141,18 +141,20 @@ equivalent to
 --
   a 1
   b 2
-Not part of block
+Not part of the attribute block
 ```
 
 ## Special forms
 
-IDM repurposes singleton tuples (`(A,),`) as a marker for special forms in IDM
-documents.
+Because you hopefully aren't using them for anything else, IDM repurposes
+singleton tuples (`(A,),`) as a marker for special forms in IDM documents.
+Special forms are needed so that IDM can read entire files, comments, blanks
+and all, into standard outline structures that preserve all the file contents.
 
-A pair with a `String` in the head singleton (`(String,),`) reads an item in
-*raw mode*. The headline of the current item, even if it's a comment or a
-blank line, is read into the pair's head string. The body of the section is
-parsed normally into the tail of the pair.
+A `String` singleton in the head position of a pair (`((String,), _)`) matches
+a line in *raw mode*. The headline of the current item, even if it's a comment
+or a blank line, is read into the pair's head string. The body of the section
+is parsed normally into the tail of the pair.
 
 ```notrust
 -- This gets read into the String at pair head (even with comment syntax)
@@ -189,6 +191,28 @@ All map-like values at pair head position must be in vertical form. If the
 type is a struct, it cannot be written in the horizontal inline struct form
 here.
 
+## Tuples and sequences
+
+The two types of simple collections supported by IDM are sequences of
+homogeneous item type and unknown length and tuples of known length and
+heterogeneous item type. Sequences match standard forms of a vertical sequence
+of lines or blocks and a horizontal sequence of words. Tuples match the same
+patterns, but also some other ones. Since singleton tuples are reserved for
+IDM special forms, actual tuples used must have length of at least 2.
+
+Since the length of a tuple is known, special rules can be applied to its
+final item. While all elements of a single-line horizontal sequence must be
+single words, the final element of a tuple is the entire rest of the line, and
+can contain whitespace. The line `key A multi-line value` can be matched into
+`(String, String)` with values `("key", "A multi-line value")`. The last value
+of a tuple can also be an item body, so the pair tuple could also match
+
+```notrust
+head
+  Multiple lines
+  of body
+```
+
 ## Structs and maps
 
 Structs and maps (map-like types) are treated very similarly. Their actual
@@ -198,20 +222,27 @@ colon prefix is how you write map keys. To keep up the charade, any standalone
 map-like value can be written as a colon block, and the parser will detect the
 additional block nesting and pop out the inner value.
 
+Parsing items of a map or a vertical struct is equivalent to parsing a
+sequence of tuples of the key and value types of a map or of strings for the
+struct fields and corresponding field value types for a struct.
+
 Unlike most other IDM types, maps only have a vertical form. This is
 important, since it makes it possible to parse an absence of a map in the
 special form where the map is parsed at the head of a pair.
 
-Structs have a horizontal form. In this form, the struct value consists of
+Structs do have a horizontal form. In this form, the struct value consists of
 only the values of struct fields, the field names are not included. The values
 are listed in the exact order they show up in struct declaration. This form is
-usually used when writing tabular data.
+usually used when writing tabular data. The user needs to be cautious with
+this form since it does not include field names, so any change in the number
+or order of the fields in a struct type will make inline values written
+against a previous version of the type invalid.
 
 IDM has very limited capabilities for representing missing values, so the
 convention for `Option` values is to omit the entire item (both key and value)
 from a map or a struct if the value is `None`. Structs written in horizontal
-form cannot have missing values. Completely empty structs or maps are possible
-in the special pair head singleton position but not elsewhere.
+form cannot have missing values. Completely empty structs or maps can be
+matched in the special pair head singleton position but not elsewhere.
 
 ## Complex structure example
 
@@ -284,6 +315,9 @@ Alpha Centauri
          BTreeMap::from([
            ("Chiron".into(),  Planet { orbit: 1.32, mass: 1.33 })])))]));
 ```
+
+For an example on how to add syntax to IDM using user-defined types, see the
+[inline maps](./examples/inline-maps.rs) example.
 
 ## Outline forms
 
@@ -367,23 +401,23 @@ file](./examples/blog.idm) in examples.
 
 ## Accepted shapes
 
-| Type             | Vertical value           | Horizontal value |
-|------------------|--------------------------|------------------|
-| atom             | block, section           | line, word       |
-| string head pair | section, line-as-section | -                |
-| map head pair    | block                    | -                |
-| map              | block                    | -                |
-| map element      | section                  | line             |
-| struct           | block                    | line             |
-| seq              | block                    | line             |
+| Type                | Vertical value           | Horizontal value |
+|---------------------|--------------------------|------------------|
+| atom                | block, section           | line, word       |
+| special string head | section, line-as-section | -                |
+| special map head    | block                    | -                |
+| map                 | block                    | -                |
+| tuple / map element | block, section           | line             |
+| struct              | block                    | line             |
+| seq                 | block                    | line             |
 
 Some types support both vertical (each item on their own line) and horizontal
 (every item on one line) values, the rest support only vertical values.
 
-Tuples that read a string in the first position trigger raw mode. Raw mode has
-the unique line-as-section parsing mode where it interprets a line as a
-section with an empty body. Normally a line is interpreted as the horizontal
-variant of a structured type.
+Pairs with a singleton string tuple in the first position trigger raw mode.
+Raw mode has the unique line-as-section parsing mode where it interprets a
+line as a section with an empty body. Normally a line is interpreted as the
+horizontal variant of a structured type.
 
 ## Notes
 
@@ -394,24 +428,18 @@ variant of a structured type.
   can still be useful for maps that collect string values or structs that have
   string values (or deserialize via strings) for all their fields.
 
-* A structural pair where the first half is a colon-indented struct or map
-  can't have the second half also be a struct or a map. Due to how the second
-  half is fused in the first, the second map cannot be syntactically
+* A special pair where the first half is a colon-indented struct or map can't
+  have the second half be another special pair with a map head. Due to how the
+  second half is fused in the first, the second map cannot be syntactically
   distinguished from the first.
 
-* Primitive types, chars, numeric types and booleans, are trimmed of unicode
+* Primitive types, chars, numeric types and booleans, are trimmed of Unicode
   whitespace like NBSP before being parsed. The main IDM algorithm treats NBSP
   as content instead of indentation. This allows you to do left-padded table
   rows without breaking IDM parsing by padding with NBSP, and still having
   primitive elements parse correctly from the leftmost table column. User
   types with custom parsing from a string value may need to trim the input
   string on their own.
-
-* To set up the locally versioned githooks, do
-
-```notrust
-git config --local core.hooksPath githooks/
-```
 
 ## License
 
