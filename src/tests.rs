@@ -77,6 +77,20 @@ fn primitives() {
 }
 
 #[test]
+fn io_api() {
+    use std::io::BufReader;
+
+    let stream = BufReader::new("1 2 3".as_bytes());
+    let deser: Vec<u32> = crate::de::from_reader(stream).unwrap();
+    assert_eq!(deser, vec![1, 2, 3]);
+
+    let mut buf = Vec::new();
+    let mut ser = crate::Serializer::new(&mut buf);
+    deser.serialize(&mut ser).unwrap();
+    assert_eq!(String::from_utf8(buf).unwrap(), "1 2 3");
+}
+
+#[test]
 fn trim_nbsp() {
     // You can left-pad a table column with NBSP to keep it valid IDM and it
     // will still parse fine if it uses primitive types.
