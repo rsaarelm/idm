@@ -718,7 +718,46 @@ fn indented_vector_struct() {
 }
 
 #[test]
-fn options_struct() {
+fn defaults_struct() {
+    #[derive(Clone, Eq, PartialEq, Default, Debug, Serialize, Deserialize)]
+    struct Defaultable {
+        #[serde(default)]
+        x: Vec<i32>,
+        #[serde(default)]
+        y: Vec<i32>,
+    }
+
+    test!(
+        &Defaultable {
+            x: Default::default(),
+            y: Default::default()
+        },
+        ""
+    );
+
+    test!(
+        &Defaultable {
+            x: vec![1],
+            y: Default::default()
+        },
+        "\
+x 1
+"
+    );
+
+    test!(
+        &Defaultable {
+            x: Default::default(),
+            y: vec![2]
+        },
+        "\
+y 2
+"
+    );
+}
+
+#[test]
+fn options_struct_vec() {
     #[derive(Clone, Eq, PartialEq, Default, Debug, Serialize, Deserialize)]
     struct Options {
         a: Option<i32>,
