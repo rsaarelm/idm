@@ -446,7 +446,14 @@ foo"
 #[test]
 fn map() {
     test!(
-        &BTreeMap::from_iter(vec![(s("bar"), 1), (s("foo"), 2),]),
+        &BTreeMap::from_iter([(s("bar"), 1),]),
+        "\
+bar 1
+"
+    );
+
+    test!(
+        &BTreeMap::from_iter([(s("bar"), 1), (s("foo"), 2),]),
         "\
 bar 1
 foo 2",
@@ -465,7 +472,7 @@ foo
     );
 
     test!(
-        &BTreeMap::from_iter(vec![
+        &BTreeMap::from_iter([
             (s("bar"), vec![1, 2, 3]),
             (s("foo"), vec![2, 3, 4]),
         ]),
@@ -481,6 +488,22 @@ foo
   2
   3
   4"
+    );
+}
+
+#[test]
+fn nested_map() {
+    test!(
+        &BTreeMap::from_iter([
+            (s("A"), BTreeMap::from_iter([(s("x"), 1), (s("y"), 2),])),
+            (s("B"), BTreeMap::from_iter([(s("z"), 3)]))
+        ]),
+        "\
+A
+  x 1
+  y 2
+B
+  z 3"
     );
 }
 
@@ -1235,7 +1258,7 @@ Title
     );
 }
 
-#[derive(PartialEq, Debug, Serialize, Deserialize)]
+#[derive(Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
 enum EnumVariants {
     Unit,
     Newtype(i32),
@@ -1293,6 +1316,18 @@ Tuple
   2
   3
 Struct 4 5"
+    );
+}
+
+#[test]
+fn enum_map_keys() {
+    use EnumVariants::*;
+
+    test!(
+        &BTreeMap::from([(Unit, s("foo"))]),
+        "\
+Unit foo
+"
     );
 }
 

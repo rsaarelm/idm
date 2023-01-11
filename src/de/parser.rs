@@ -10,7 +10,7 @@ use crate::{
     err, Error, Result,
 };
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Parser<'a> {
     stack: Vec<State<'a>>,
     /// Flag for the weird special stuff part.
@@ -235,8 +235,8 @@ impl<'a> Parser<'a> {
     pub fn is_word(&self) -> bool {
         // XXX: Calling next on the top item, whatever it is, can be very
         // expensive. There is probably a smarter way to do this.
-        let mut head = self.stack[self.stack.len() - 1].clone();
-        let text = head.next().unwrap_or_else(|_| Cow::from(""));
+        let mut probe = self.clone();
+        let text = probe.read_str().unwrap_or_else(|_| Cow::from(""));
         let text = text.trim();
         !text.is_empty() && !text.chars().any(|c| c.is_whitespace())
     }
