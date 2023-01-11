@@ -1332,6 +1332,29 @@ Unit foo
 }
 
 #[test]
+fn enum_tuples() {
+    use EnumVariants::*;
+
+    test!(&(Unit, Unit), "Unit Unit");
+
+    test!(&(Unit, Newtype(1)), "Unit Newtype 1");
+
+    test!(
+        &(Newtype(1), Unit),
+        "\
+Newtype 1
+Unit"
+    );
+
+    test!(
+        &(Newtype(1), Newtype(2)),
+        "\
+Newtype 1
+Newtype 2"
+    );
+}
+
+#[test]
 fn string_literal_indent_rewrite() {
     // Multiline string literals need to have their indentation rewritten to
     // match a changed file indent style.
