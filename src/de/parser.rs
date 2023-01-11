@@ -283,6 +283,11 @@ impl SeqConfig {
                 words.reverse();
                 let mut fields = fields.to_vec();
                 fields.reverse();
+                if words.len() != fields.len() {
+                    // Word count doesn't match field count, can't be a valid
+                    // inline struct.
+                    return None;
+                }
                 Some(State::InlineStruct {
                     words,
                     fields,
