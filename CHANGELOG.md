@@ -6,6 +6,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [0.4.1] - 2023-01-12
+
 ### Fixed
 - Bugfix for determining whether an enum variant is unit or nonunit.
 - Do not try to deserialize an inline struct if the number of items does not
