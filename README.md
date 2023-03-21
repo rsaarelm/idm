@@ -159,7 +159,7 @@ Not part of the attribute block
 ## Special forms
 
 Because you hopefully aren't using them for anything else, IDM repurposes
-singleton tuples (`(A,),`) as a marker for special forms in IDM documents.
+singleton tuples (`(A,)`) as a marker for special forms in IDM documents.
 Special forms are needed so that IDM can read entire files, comments, blanks
 and all, into standard outline structures that preserve all the file contents.
 
