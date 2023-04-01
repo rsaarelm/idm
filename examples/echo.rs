@@ -1,6 +1,5 @@
 use std::io::Read;
 
-use idm;
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 
