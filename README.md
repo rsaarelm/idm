@@ -12,8 +12,7 @@ self-describing, IDM files can get by with less syntax than almost any other
 human-writable data serialization language.
 
 The motivation is to provide a notation that is close to freeform handwritten
-plaintext notes. Because the format is not self-describing, the syntax can be
-very lightweight. IDM can be thought of as a long-form user interface to a
+plaintext notes. IDM can be thought of as a long-form user interface to a
 program rather than just a data exchange protocol for computers.
 
 It's basically a fixie bike serialization format. Simple, arguably fun and
@@ -21,9 +20,11 @@ having it as your daily driver might cause a horrific crash sooner or later.
 It is expected that the user controls both the data and the types when using
 it, and can work around corner cases which it can't handle.
 
-If you need robust serialization of any Rust data structure or just general
-high reliability, you probably want a more verbose serialization language like
-JSON, YAML or [RON](https://github.com/ron-rs/ron).
+If you need robust serialization of any Rust data structure, hassle-free
+collaboration between multiple people who aren't always communicating closely
+with each other, or just general high reliability, you probably want a more
+verbose serialization language like JSON, YAML or
+[RON](https://github.com/ron-rs/ron).
 
 ## Usage
 
