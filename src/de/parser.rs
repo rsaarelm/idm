@@ -279,15 +279,11 @@ impl SeqConfig {
                 item,
             }),
             Struct(fields) if item.is_line() => {
-                let mut vals = parse::words(item.head).0;
+                let Ok(vals) = parse::n_elements(item.head, fields.len()) else { return None };
+                let mut vals = vals.0;
                 vals.reverse();
                 let mut fields = fields.to_vec();
                 fields.reverse();
-                if vals.len() != fields.len() {
-                    // Word count doesn't match field count, can't be a valid
-                    // inline struct.
-                    return None;
-                }
                 Some(State::InlineStruct {
                     vals,
                     fields,
@@ -550,6 +546,20 @@ impl<'a> State<'a> {
                 Default::default()
             }
 
+            State::InlineStruct { vals, fields, .. } => {
+                if fields.is_empty()
+                    && vals.len() == 1
+                    && config.allows_inline()
+                {
+                    ret = config
+                        .inline_state(Item::new_head(vals[0]))
+                        .ok_or_else(|| Error::new("Can't inline"));
+                } else {
+                    ret = err!("Invalid inline nesting");
+                }
+                Default::default()
+            }
+
             State::SpecialFirst(Fragment::Item(i)) => {
                 // Synthesize an outline.
                 let outline = Outline(vec![i]);
@@ -595,11 +605,6 @@ impl<'a> State<'a> {
                 config.try_unfold(&mut o);
                 ret = Ok(State::VerticalSeq(o));
                 Default::default()
-            }
-
-            _ => {
-                ret = err!("enter_seq: Invalid type");
-                s
             }
         });
 

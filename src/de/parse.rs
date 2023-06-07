@@ -25,15 +25,29 @@ pub fn word(input: &str) -> ParseResult<&str> {
     }
 }
 
-/// Split a line into words
-pub fn words(input: &str) -> (Vec<&str>, &str) {
+/// Split a line into (n-1) words and trailing content.
+///
+/// The last element must consist of one or more words.
+pub fn n_elements(input: &str, n: usize) -> ParseResult<Vec<&str>> {
     let mut ret = Vec::new();
     let mut current = input;
-    while let Ok((word, rest)) = word(current) {
+
+    for i in 0..n {
+        let (elt, rest);
+
+        if i < n - 1 {
+            (elt, rest) = word(current)?;
+        } else {
+            (elt, rest) = line(current)?;
+            if elt.is_empty() {
+                return Err(current);
+            }
+        }
+
         current = rest;
-        ret.push(word);
+        ret.push(elt);
     }
-    (ret, current)
+    Ok((ret, current))
 }
 
 pub fn line(input: &str) -> ParseResult<&str> {

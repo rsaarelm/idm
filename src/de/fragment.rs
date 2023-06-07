@@ -355,6 +355,13 @@ impl<'a> Item<'a> {
             body: Default::default(),
         }
     }
+
+    pub fn new_head(head: &'a str) -> Item<'a> {
+        Item {
+            head,
+            ..Default::default()
+        }
+    }
 }
 
 impl fmt::Display for Item<'_> {

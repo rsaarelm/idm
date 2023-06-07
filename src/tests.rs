@@ -279,6 +279,37 @@ fn tail_lining() {
 foo bar
   squeamish ossifrage"
     );
+
+    test!(
+        &(s("foo"), s("bar"), vec![s("squeamish"), s("ossifrage")]),
+        "foo bar squeamish ossifrage"
+    );
+}
+
+#[test]
+fn struct_tail_lining() {
+    #[derive(Clone, Eq, PartialEq, Default, Debug, Serialize, Deserialize)]
+    struct Tailed {
+        x: i32,
+        tail: Vec<String>,
+    }
+
+    test!(
+        &Tailed {
+            x: 10,
+            tail: vec![s("foo")]
+        },
+        _,
+        "10 foo"
+    );
+    test!(
+        &Tailed {
+            x: 10,
+            tail: vec![s("foo"), s("bar")]
+        },
+        _,
+        "10 foo bar"
+    );
 }
 
 #[test]
