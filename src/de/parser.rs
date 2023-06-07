@@ -279,17 +279,17 @@ impl SeqConfig {
                 item,
             }),
             Struct(fields) if item.is_line() => {
-                let mut words = parse::words(item.head).0;
-                words.reverse();
+                let mut vals = parse::words(item.head).0;
+                vals.reverse();
                 let mut fields = fields.to_vec();
                 fields.reverse();
-                if words.len() != fields.len() {
+                if vals.len() != fields.len() {
                     // Word count doesn't match field count, can't be a valid
                     // inline struct.
                     return None;
                 }
                 Some(State::InlineStruct {
-                    words,
+                    vals,
                     fields,
                     fake_seq: false,
                 })
@@ -332,7 +332,7 @@ enum State<'a> {
 
     /// Value fields of an inline struct.
     InlineStruct {
-        words: Vec<&'a str>,
+        vals: Vec<&'a str>,
         fields: Vec<&'static str>,
         // Set to true to spoof entering and false to spoof exiting a pair
         // when reading an inline struct.
@@ -414,25 +414,25 @@ impl<'a> State<'a> {
                 State::SectionSeq { i: i + 1, n, item }
             }
             State::InlineStruct {
-                mut words,
+                mut vals,
                 mut fields,
                 fake_seq,
             } => {
                 // Alternate between struct field names (acquired from serde,
                 // not present in input) and field values.
-                if words.is_empty() {
+                if vals.is_empty() {
                     return State::Document(Default::default());
-                } else if fields.len() == words.len() {
+                } else if fields.len() == vals.len() {
                     // When vecs are balanced, hand out a field name first.
                     ret = Ok(Cow::from(fields.pop().unwrap()));
                 } else {
                     // If out of balance, assume a field name was handed out
                     // the last time, give the corresponding value.
-                    debug_assert!(fields.len() + 1 == words.len());
-                    ret = Ok(Cow::from(words.pop().unwrap()));
+                    debug_assert!(fields.len() + 1 == vals.len());
+                    ret = Ok(Cow::from(vals.pop().unwrap()));
                 }
                 State::InlineStruct {
-                    words,
+                    vals,
                     fields,
                     fake_seq,
                 }
@@ -654,7 +654,7 @@ impl<'a> State<'a> {
             State::Document(f) => f.is_empty(),
             State::VerticalSeq(o) => o.is_empty_or_blank(),
             State::SectionSeq { item, .. } => item.is_blank(),
-            State::InlineStruct { words, .. } => words.is_empty(),
+            State::InlineStruct { vals, .. } => vals.is_empty(),
             // Special halves are considered nonempty if pair was entered
             // succesfully.
             State::SpecialFirst(_) => false,
@@ -667,7 +667,7 @@ impl<'a> State<'a> {
             State::Document(f) => f.is_empty(),
             State::VerticalSeq(o) => o.is_empty(),
             State::SectionSeq { item, .. } => item.is_blank(),
-            State::InlineStruct { words, .. } => words.is_empty(),
+            State::InlineStruct { vals, .. } => vals.is_empty(),
             // Special halves are considered nonempty if pair was entered
             // succesfully.
             State::SpecialFirst(_) => false,
@@ -687,14 +687,14 @@ impl fmt::Display for State<'_> {
             State::SectionSeq { item, .. } => {
                 write!(f, "SectionSeq({item})")
             }
-            State::InlineStruct { words, fields, .. } => {
+            State::InlineStruct { vals, fields, .. } => {
                 writeln!(f, "InlineStruct(")?;
                 write!(f, " ")?;
                 for a in fields.iter().rev() {
                     write!(f, " {a}")?;
                 }
                 writeln!(f)?;
-                for w in words.iter().rev() {
+                for w in vals.iter().rev() {
                     write!(f, " {w}")?;
                 }
                 write!(f, ")")
