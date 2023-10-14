@@ -160,12 +160,12 @@ Not part of the attribute block
 ## Special forms
 
 Because you hopefully aren't using them for anything else, IDM repurposes
-singleton tuples (`(A,)`) as a marker for special forms in IDM documents.
+singleton tuples `(A,)` as a marker for special forms in IDM documents.
 Special forms are needed so that IDM can read entire files, comments, blanks
 and all, into standard outline structures that preserve all the file contents.
 
-A `String` singleton in the head position of a pair (`((String,), _)`) matches
-a line in *raw mode*. The headline of the current item, even if it's a comment
+A `String` singleton in the head position of a pair `((String,), _)` matches a
+line in *raw mode*. The headline of the current item, even if it's a comment
 or a blank line, is read into the pair's head string. The body of the section
 is parsed normally into the tail of the pair.
 
@@ -446,7 +446,7 @@ horizontal variant of a structured type.
   second half is fused in the first, the second map cannot be syntactically
   distinguished from the first.
 
-* Primitive types, chars, numeric types and booleans, are trimmed of Unicode
+* Primitive types (chars, numeric types and booleans) are trimmed of Unicode
   whitespace like NBSP before being parsed. The main IDM algorithm treats NBSP
   as content instead of indentation. This allows you to do left-padded table
   rows without breaking IDM parsing by padding with NBSP, and still having
