@@ -279,7 +279,10 @@ impl SeqConfig {
                 item,
             }),
             Struct(fields) if item.is_line() => {
-                let Ok(vals) = parse::n_elements(item.head, fields.len()) else { return None };
+                let Ok(vals) = parse::n_elements(item.head, fields.len())
+                else {
+                    return None;
+                };
                 let mut vals = vals.0;
                 vals.reverse();
                 let mut fields = fields.to_vec();
