@@ -482,6 +482,20 @@ impl<'a> State<'a> {
                 }
                 Default::default()
             }
+            // Parsing a pair and there's a single item in the sequence, so no
+            // chance of parsing a vertical pair, see if it works as a
+            // section.
+            State::Document(Fragment::Outline(mut o))
+                if matches!(config, Tuple(2)) && o.len() == 1 =>
+            {
+                let item = o.pop().unwrap();
+                if let Some(next) = config.inline_state(item) {
+                    ret = Ok(next);
+                } else {
+                    ret = err!("Invalid sequence shape");
+                }
+                Default::default()
+            }
             State::Document(Fragment::Outline(mut o)) => {
                 config.try_unfold(&mut o);
                 ret = Ok(State::VerticalSeq(o));

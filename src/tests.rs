@@ -249,6 +249,17 @@ fn multi_nesting() {
 }
 
 #[test]
+fn standalone_section() {
+    test!(
+        &(1, 2),
+        _,
+        "\
+1
+  2"
+    );
+}
+
+#[test]
 fn word_tables() {
     // Regular text can be exploded into words with a nested vec.
     test!(
