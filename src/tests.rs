@@ -324,6 +324,42 @@ fn struct_tail_lining() {
 }
 
 #[test]
+fn tuple_enum_tail_lining() {
+    #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+    enum Tailed {
+        Xyzzy(i32, String),
+    }
+
+    test!(&Tailed::Xyzzy(10, s("foo"),), _, "Xyzzy 10 foo");
+    test!(&Tailed::Xyzzy(10, s("foo bar"),), _, "Xyzzy 10 foo bar");
+}
+
+#[test]
+fn struct_enum_tail_lining() {
+    #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+    enum Tailed {
+        Xyzzy { x: i32, tail: Vec<String> },
+    }
+
+    test!(
+        &Tailed::Xyzzy {
+            x: 10,
+            tail: vec![s("foo")]
+        },
+        _,
+        "Xyzzy 10 foo"
+    );
+    test!(
+        &Tailed::Xyzzy {
+            x: 10,
+            tail: vec![s("foo"), s("bar")]
+        },
+        _,
+        "Xyzzy 10 foo bar"
+    );
+}
+
+#[test]
 fn section_atoms() {
     // Atoms can be section-like.
     test!(

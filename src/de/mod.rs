@@ -410,11 +410,11 @@ impl<'de, 'a> de::VariantAccess<'de> for Enum<'a, 'de> {
         seed.deserialize(&mut *self.de)
     }
 
-    fn tuple_variant<V>(self, _len: usize, visitor: V) -> Result<V::Value>
+    fn tuple_variant<V>(self, len: usize, visitor: V) -> Result<V::Value>
     where
         V: de::Visitor<'de>,
     {
-        de::Deserializer::deserialize_seq(&mut *self.de, visitor)
+        de::Deserializer::deserialize_tuple(&mut *self.de, len, visitor)
     }
 
     fn struct_variant<V>(
