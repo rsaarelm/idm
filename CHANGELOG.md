@@ -6,9 +6,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [0.4.2] - 2023-11-07
+
 ### Added
-- Inline structs support similar tail value inlining as do tuples.
-- Enum tuples and enum structs support tail value inlining.
+- Inline structs, tuple enums and struct enums support similar tail value
+  inlining as do plain tuples.
+
+### Fixed
+- Standalone section-shaped pairs are parsed correctly.
 
 ## [0.4.1] - 2023-01-12
 
