@@ -20,7 +20,7 @@ take_mut = "0.2"
 [dev-dependencies]
 chrono = "0.4"
 clap = { version = "4", features = ["derive"] }
-indexmap = { version = "1", features = ["serde"] }
+indexmap = { version = "2", features = ["serde"] }
 lazy_static = "1"
 pretty_assertions = "1"
 regex = "1"
