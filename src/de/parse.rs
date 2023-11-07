@@ -113,19 +113,14 @@ fn line_indent(input: &str) -> ParseResult<Option<Indent>> {
     Ok((Some(Indent::default()), ""))
 }
 
-#[derive(Copy, Clone, Eq, PartialEq, Debug)]
+#[derive(Copy, Clone, Default, Eq, PartialEq, Debug)]
 pub enum Indent {
+    #[default]
     Undetermined,
     /// Current indentation is n spaces, subsequent indentation must be spaces.
     Spaces(usize),
     /// Current indentation is n tabs, subsequent indentation must be tabs.
     Tabs(usize),
-}
-
-impl Default for Indent {
-    fn default() -> Self {
-        Indent::Undetermined
-    }
 }
 
 impl Indent {
