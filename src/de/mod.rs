@@ -336,7 +336,7 @@ impl<'a, 'de> de::SeqAccess<'de> for Sequence<'a, 'de> {
             // deserializer implementation isn't designed to be cheap to
             // clone...
             if let Ok(raw) = seed.deserialize(&mut *self.de) {
-                return Ok(raw).map(Some);
+                return Ok(Some(raw));
             } else {
                 return Ok(None);
             }
