@@ -1,8 +1,10 @@
+.direnv/
+.envrc
+
+result
+
 target/
 Cargo.lock
-
-.direnv/
-result
 
 tarpaulin-report.html
 flamegraph.svg
