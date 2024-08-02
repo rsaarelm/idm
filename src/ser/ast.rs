@@ -353,9 +353,9 @@ impl ser::Serializer for Ast {
         Ok(Expr::default())
     }
 
-    fn serialize_some<T: ?Sized>(self, value: &T) -> Result<Self::Ok>
+    fn serialize_some<T>(self, value: &T) -> Result<Self::Ok>
     where
-        T: serde::Serialize,
+        T: serde::Serialize + ?Sized,
     {
         value.serialize(self)
     }
@@ -377,18 +377,18 @@ impl ser::Serializer for Ast {
         variant.serialize(self)
     }
 
-    fn serialize_newtype_struct<T: ?Sized>(
+    fn serialize_newtype_struct<T>(
         self,
         _name: &'static str,
         value: &T,
     ) -> Result<Self::Ok>
     where
-        T: serde::Serialize,
+        T: serde::Serialize + ?Sized,
     {
         value.serialize(self)
     }
 
-    fn serialize_newtype_variant<T: ?Sized>(
+    fn serialize_newtype_variant<T>(
         self,
         _name: &'static str,
         _variant_index: u32,
@@ -396,7 +396,7 @@ impl ser::Serializer for Ast {
         value: &T,
     ) -> Result<Self::Ok>
     where
-        T: serde::Serialize,
+        T: serde::Serialize + ?Sized,
     {
         Ok(Expr::EnumVariant(variant, Box::new(value.serialize(self)?)))
     }
@@ -460,9 +460,9 @@ impl ser::SerializeSeq for Expr {
     type Ok = Expr;
     type Error = Error;
 
-    fn serialize_element<T: ?Sized>(&mut self, value: &T) -> Result<()>
+    fn serialize_element<T>(&mut self, value: &T) -> Result<()>
     where
-        T: serde::Serialize,
+        T: serde::Serialize + ?Sized,
     {
         self.push(value.serialize(Ast)?)
     }
@@ -476,9 +476,9 @@ impl ser::SerializeTuple for Expr {
     type Ok = Expr;
     type Error = Error;
 
-    fn serialize_element<T: ?Sized>(&mut self, value: &T) -> Result<()>
+    fn serialize_element<T>(&mut self, value: &T) -> Result<()>
     where
-        T: serde::Serialize,
+        T: serde::Serialize + ?Sized,
     {
         self.push(value.serialize(Ast)?)
     }
@@ -524,16 +524,16 @@ impl ser::SerializeMap for Expr {
     type Ok = Expr;
     type Error = Error;
 
-    fn serialize_key<T: ?Sized>(&mut self, key: &T) -> Result<()>
+    fn serialize_key<T>(&mut self, key: &T) -> Result<()>
     where
-        T: Serialize,
+        T: Serialize + ?Sized,
     {
         self.push(key.serialize(Ast)?)
     }
 
-    fn serialize_value<T: ?Sized>(&mut self, value: &T) -> Result<()>
+    fn serialize_value<T>(&mut self, value: &T) -> Result<()>
     where
-        T: Serialize,
+        T: Serialize + ?Sized,
     {
         self.set_map_value(value.serialize(Ast)?);
         Ok(())
@@ -567,7 +567,7 @@ impl ser::SerializeStructVariant for Expr {
 
     fn serialize_field<T>(&mut self, key: &'static str, value: &T) -> Result<()>
     where
-        T: ?Sized + Serialize,
+        T: Serialize + ?Sized,
     {
         ser::SerializeStruct::serialize_field(self, key, value)
     }

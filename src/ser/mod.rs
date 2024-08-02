@@ -416,9 +416,9 @@ impl<'a, W: Write> ser::Serializer for &'a mut Serializer<W> {
         self.write(&Ast.serialize_none()?)
     }
 
-    fn serialize_some<T: ?Sized>(self, value: &T) -> Result<Self::Ok>
+    fn serialize_some<T>(self, value: &T) -> Result<Self::Ok>
     where
-        T: serde::Serialize,
+        T: serde::Serialize + ?Sized,
     {
         self.write(&Ast.serialize_some(value)?)
     }
@@ -440,18 +440,18 @@ impl<'a, W: Write> ser::Serializer for &'a mut Serializer<W> {
         self.write(&Ast.serialize_unit_variant(name, variant_index, variant)?)
     }
 
-    fn serialize_newtype_struct<T: ?Sized>(
+    fn serialize_newtype_struct<T>(
         self,
         name: &'static str,
         value: &T,
     ) -> Result<Self::Ok>
     where
-        T: serde::Serialize,
+        T: serde::Serialize + ?Sized,
     {
         self.write(&Ast.serialize_newtype_struct(name, value)?)
     }
 
-    fn serialize_newtype_variant<T: ?Sized>(
+    fn serialize_newtype_variant<T>(
         self,
         name: &'static str,
         variant_index: u32,
@@ -459,7 +459,7 @@ impl<'a, W: Write> ser::Serializer for &'a mut Serializer<W> {
         value: &T,
     ) -> Result<Self::Ok>
     where
-        T: serde::Serialize,
+        T: serde::Serialize + ?Sized,
     {
         self.write(&Ast.serialize_newtype_variant(
             name,
@@ -543,9 +543,9 @@ impl<'a, W: Write> ser::SerializeSeq for Sequence<'a, W> {
     type Ok = ();
     type Error = Error;
 
-    fn serialize_element<T: ?Sized>(&mut self, value: &T) -> Result<()>
+    fn serialize_element<T>(&mut self, value: &T) -> Result<()>
     where
-        T: serde::Serialize,
+        T: serde::Serialize + ?Sized,
     {
         self.expr.serialize_element(value)
     }
@@ -560,9 +560,9 @@ impl<'a, W: Write> ser::SerializeTuple for Sequence<'a, W> {
     type Ok = ();
     type Error = Error;
 
-    fn serialize_element<T: ?Sized>(&mut self, value: &T) -> Result<()>
+    fn serialize_element<T>(&mut self, value: &T) -> Result<()>
     where
-        T: serde::Serialize,
+        T: serde::Serialize + ?Sized,
     {
         self.expr.serialize_element(value)
     }
@@ -611,16 +611,16 @@ impl<'a, W: Write> ser::SerializeMap for Sequence<'a, W> {
     type Ok = ();
     type Error = Error;
 
-    fn serialize_key<T: ?Sized>(&mut self, key: &T) -> Result<()>
+    fn serialize_key<T>(&mut self, key: &T) -> Result<()>
     where
-        T: Serialize,
+        T: Serialize + ?Sized,
     {
         self.expr.serialize_key(key)
     }
 
-    fn serialize_value<T: ?Sized>(&mut self, value: &T) -> Result<()>
+    fn serialize_value<T>(&mut self, value: &T) -> Result<()>
     where
-        T: Serialize,
+        T: Serialize + ?Sized,
     {
         self.expr.serialize_value(value)
     }
