@@ -385,6 +385,23 @@ fn struct_tail_lining() {
         _,
         "10 foo bar"
     );
+
+    test!(
+        &[
+            Tailed {
+                x: 10,
+                tail: vec![s("foo"), s("bar")]
+            },
+            Tailed {
+                x: 20,
+                tail: vec![s("baz"), s("quux")]
+            },
+        ],
+        _,
+        "\
+10 foo bar
+20 baz quux"
+    );
 }
 
 #[test]

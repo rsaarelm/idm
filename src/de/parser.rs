@@ -568,9 +568,18 @@ impl<'a> State<'a> {
                     && vals.len() == 1
                     && config.allows_inline()
                 {
+                    // We're recursing into a tail-lined sequence value at the
+                    // end of an inline struct.
                     ret = config
                         .inline_state(Item::new_head(vals[0]))
                         .ok_or_else(|| Error::new("Can't inline"));
+                    // Make sure our inner sequence state stays wrapped in a
+                    // fake_seq flag carrying InlineStruct state.
+                    return State::InlineStruct {
+                        vals: Default::default(),
+                        fields: Default::default(),
+                        fake_seq: true,
+                    };
                 } else {
                     ret = err!("Invalid inline nesting");
                 }
