@@ -234,6 +234,70 @@ fn nested_sequence() {
 }
 
 #[test]
+fn nested_tuples() {
+    test!(
+        &((1, 2), (3, 4)),
+        "\
+1 2
+3 4",
+        "\
+1 2
+
+3 4",
+        "\
+--
+  1
+  2
+--
+  3
+  4",
+        "\
+--
+  1
+  2
+-- Here is a multiline comment
+-- Multiple comment lines with no content in between
+--
+-- Even if they're empty
+-- Don't mean an empty sequence exists in between them
+--
+  3
+  4"
+    );
+
+    // Tuples inside a sequence.
+    test!(
+        &[(1, 2), (3, 4)],
+        "\
+1 2
+3 4",
+        "\
+1 2
+
+3 4",
+        "\
+--
+  1
+  2
+--
+  3
+  4",
+        "\
+--
+  1
+  2
+-- Here is a multiline comment
+-- Multiple comment lines with no content in between
+--
+-- Even if they're empty
+-- Don't mean an empty sequence exists in between them
+--
+  3
+  4"
+    );
+}
+
+#[test]
 fn multi_nesting() {
     // Outline list of matrices.
     test!(
@@ -1124,6 +1188,23 @@ Content"
 
 #[test]
 fn inline_structs() {
+    #[derive(Clone, Eq, PartialEq, Default, Debug, Serialize, Deserialize)]
+    struct Data {
+        x: u32,
+        y: u32,
+    }
+
+    test!(
+        &[Data { x: 1, y: 2 }, Data { x: 3, y: 4 },],
+        _,
+        "\
+1 2
+3 4"
+    );
+}
+
+#[test]
+fn complex_inline_structs() {
     test!(
         &*STARMAP,
         _,
