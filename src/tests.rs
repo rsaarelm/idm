@@ -1,11 +1,10 @@
-use std::{collections::BTreeMap, fmt, iter::FromIterator};
+use std::{collections::BTreeMap, fmt, iter::FromIterator, sync::OnceLock};
 
 use crate::{
     from_str, outline, outline::Outline, ser::Indentation, to_string,
     to_string_styled, to_string_styled_like,
 };
 use indexmap::IndexMap;
-use lazy_static::lazy_static;
 use pretty_assertions::assert_eq;
 use serde::{Deserialize, Serialize};
 
@@ -1103,31 +1102,32 @@ struct Planet {
     mass: f32,
 }
 
-lazy_static! {
-    #[rustfmt::skip]
-    static ref STARMAP: IndexMap<String, ((Star,), IndexMap<String, Planet>)> = IndexMap::from_iter(
-        vec![
-            (s("Sol"),
-            ((Star { age: 4.6e9, mass: 1.0},),
-             IndexMap::from_iter([
-                 (s("Mercury"), Planet { orbit: 0.39, mass: 0.055 }),
-                 (s("Venus"),   Planet { orbit: 0.72, mass: 0.815 }),
-                 (s("Earth"),   Planet { orbit: 1.0,  mass: 1.0 }),
-                 (s("Mars"),    Planet { orbit: 1.52, mass: 0.1 })
-            ].into_iter()))),
-            (s("Alpha Centauri"),
-            ((Star { age: 5.3e9, mass: 1.1},),
-             IndexMap::from_iter([
-                 (s("Eurytion"), Planet { orbit: 0.47, mass: 0.08 }),
-                 (s("Chiron"),   Planet { orbit: 1.32, mass: 1.33 }),
-            ].into_iter()))),
-        ].into_iter());
+#[rustfmt::skip]
+fn starmap() -> &'static IndexMap<String, ((Star,), IndexMap<String, Planet>)> {
+    static STARMAP: OnceLock<IndexMap<String, ((Star,), IndexMap<String, Planet>)>> = OnceLock::new();
+
+    STARMAP.get_or_init(|| IndexMap::from_iter([
+        (s("Sol"),
+        ((Star { age: 4.6e9, mass: 1.0},),
+            IndexMap::from_iter([
+                (s("Mercury"), Planet { orbit: 0.39, mass: 0.055 }),
+                (s("Venus"),   Planet { orbit: 0.72, mass: 0.815 }),
+                (s("Earth"),   Planet { orbit: 1.0,  mass: 1.0 }),
+                (s("Mars"),    Planet { orbit: 1.52, mass: 0.1 })
+        ]))),
+        (s("Alpha Centauri"),
+        ((Star { age: 5.3e9, mass: 1.1},),
+            IndexMap::from_iter([
+                (s("Eurytion"), Planet { orbit: 0.47, mass: 0.08 }),
+                (s("Chiron"),   Planet { orbit: 1.32, mass: 1.33 }),
+        ]))),
+    ]))
 }
 
 #[test]
 fn nesting_contents() {
     test!(
-        &*STARMAP,
+        starmap(),
         "\
 Sol
   :age 4600000000
@@ -1223,7 +1223,7 @@ fn inline_structs() {
 #[test]
 fn complex_inline_structs() {
     test!(
-        &*STARMAP,
+        starmap(),
         _,
         "\
 Sol
