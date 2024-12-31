@@ -742,11 +742,6 @@ mod tests {
         fn seq(&mut self, p: impl FnOnce(&mut Self));
         fn pair(&mut self, p: impl FnOnce(&mut Self));
         fn map(&mut self, p: impl FnOnce(&mut Self));
-        fn strct(
-            &mut self,
-            fields: &'static [&'static str],
-            p: impl FnOnce(&mut Self),
-        );
 
         // Syntax sugar for reading next value.
         fn n(&mut self) -> Cow<str>;
@@ -768,16 +763,6 @@ mod tests {
 
         fn map(&mut self, p: impl FnOnce(&mut Self)) {
             self.enter_map().unwrap();
-            p(self);
-            self.exit().unwrap();
-        }
-
-        fn strct(
-            &mut self,
-            fields: &'static [&'static str],
-            p: impl FnOnce(&mut Self),
-        ) {
-            self.enter_struct(fields).unwrap();
             p(self);
             self.exit().unwrap();
         }
