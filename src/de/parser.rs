@@ -302,6 +302,10 @@ impl SeqConfig {
             _ => None,
         }
     }
+
+    fn is_pair(&self) -> bool {
+        matches!(self, Tuple(2))
+    }
 }
 
 /// Parsing states that carry context fragments and are stacked in the parser
@@ -551,8 +555,20 @@ impl<'a> State<'a> {
                     } else if i == len - 1 && item.is_block() {
                         let mut body = item.body;
                         config.try_unfold(&mut body);
-                        // Entire body at end of section-tuple.
-                        ret = Ok(State::VerticalSeq(body));
+                        if config.is_pair()
+                            && body.0.len() == 1
+                            && body.0[0].is_section()
+                        {
+                            // Recurse into another section.
+                            ret = Ok(State::SectionSeq {
+                                i: 0,
+                                n: Some(2),
+                                item: body.0.pop().unwrap(),
+                            });
+                        } else {
+                            // Entire body at end of section-tuple.
+                            ret = Ok(State::VerticalSeq(body));
+                        }
                         return Default::default();
                     }
                 } else {

@@ -1531,6 +1531,26 @@ Newtype 2"
 }
 
 #[test]
+fn enum_field() {
+    use EnumVariants::*;
+    #[derive(Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
+    struct Holder {
+        data: EnumVariants,
+    }
+
+    test!(
+        &Holder {
+            data: Struct { x: 1, y: 2 }
+        },
+        "\
+data
+  Struct
+    x 1
+    y 2"
+    );
+}
+
+#[test]
 fn string_literal_indent_rewrite() {
     // Multiline string literals need to have their indentation rewritten to
     // match a changed file indent style.
